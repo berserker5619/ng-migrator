@@ -1,7 +1,10 @@
+import { mkdir, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { runCli, type CliIo } from '../src/cli/program.js';
 import { ERRORS, ExitCode } from '../src/errors.js';
 import { TOOL_VERSION } from '../src/version.js';
+import { tempProject, writeCacheEntry } from './helpers.js';
 
 function io(overrides: Partial<CliIo> = {}) {
   const out: string[] = [];
@@ -71,6 +74,159 @@ describe('cli', () => {
 
   it('has error ids whose first digit matches the exit code', () => {
     for (const [id, spec] of Object.entries(ERRORS)) expect(id.charAt(4)).toBe(String(spec.exitCode));
+  });
+
+  it('supports global --project <path> across doctor, analyze, plan, status, and approve with project-relative paths', async () => {
+    const { dir, cleanup } = await tempProject();
+    try {
+      await writeFile(
+        path.join(dir, 'package.json'),
+        JSON.stringify({
+          name: 'proj-flag-test',
+          dependencies: {
+            '@angular/core': '^15.2.0',
+          },
+        }),
+      );
+      await mkdir(path.join(dir, 'src'), { recursive: true });
+      await writeFile(path.join(dir, 'src', 'main.ts'), 'export const x = 1;');
+
+      await writeCacheEntry(dir, '@angular/core', {
+        name: '@angular/core',
+        distTags: { latest: '16.2.12' },
+        versions: {
+          '15.2.0': { version: '15.2.0' },
+          '16.2.12': { version: '16.2.12' },
+        },
+      });
+      await writeCacheEntry(dir, '@angular/compiler-cli', {
+        name: '@angular/compiler-cli',
+        distTags: { latest: '16.2.12' },
+        versions: {
+          '16.2.12': { version: '16.2.12', peerDependencies: { typescript: '>=4.9.3 <5.2.0' } },
+        },
+      });
+      await writeCacheEntry(dir, '@angular/cli', {
+        name: '@angular/cli',
+        distTags: { latest: '16.2.12' },
+        versions: {
+          '16.2.12': { version: '16.2.12' },
+        },
+      });
+
+      // Run from a completely different cwd using --project <dir>
+      const otherCwd = path.dirname(dir);
+
+      const dOut = io({ cwd: otherCwd });
+      expect(await runCli(['--project', dir, 'doctor'], dOut.value)).toBe(ExitCode.Success);
+      expect(dOut.out()).toContain('Doctor check completed');
+
+      const aOut = io({ cwd: otherCwd });
+      expect(await runCli(['--project', dir, 'analyze', '--offline'], aOut.value)).toBe(ExitCode.Success);
+      expect(aOut.out()).toContain('proj-flag-test');
+      expect(aOut.out()).not.toContain(dir);
+
+      const pOut = io({ cwd: otherCwd });
+      expect(await runCli(['--project', dir, 'plan', '--to', '16', '--offline', '--allow-dirty'], pOut.value)).toBe(ExitCode.Success);
+      expect(pOut.out()).toContain('.ng-migrator/steps/01-angular-15-to-16.md');
+      expect(pOut.out()).not.toContain(dir);
+
+      const sOut = io({ cwd: otherCwd });
+      expect(await runCli(['--project', dir, 'status'], sOut.value)).toBe(ExitCode.Success);
+      expect(sOut.out()).toContain('Step 1: Angular 15 -> 16 [planned]');
+
+      const appOut = io({ cwd: otherCwd });
+      expect(await runCli(['--project', dir, 'approve', '1'], appOut.value)).toBe(ExitCode.Success);
+      expect(appOut.out()).toContain('Step 1 (Angular 15 to 16) is now approved');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('analyze --fail-on-blockers returns exit code 4 only for hard blockers, never for soft ones', async () => {
+    const { dir, cleanup } = await tempProject();
+    try {
+      await mkdir(path.join(dir, 'src'), { recursive: true });
+      await writeFile(path.join(dir, 'src', 'main.ts'), "import '@angular/flex-layout';");
+
+      // Case 1: Only soft blocker (@angular/flex-layout on Angular 15 -> 16 has open-ended peer >=15.0.2)
+      await writeFile(
+        path.join(dir, 'package.json'),
+        JSON.stringify({
+          name: 'soft-blocker-app',
+          dependencies: {
+            '@angular/core': '^15.2.0',
+            '@angular/flex-layout': '15.0.0-beta.42',
+          },
+        }),
+      );
+      await writeCacheEntry(dir, '@angular/core', {
+        name: '@angular/core',
+        distTags: { latest: '16.2.12' },
+        versions: {
+          '15.2.0': { version: '15.2.0' },
+          '16.2.12': { version: '16.2.12' },
+        },
+      });
+      await writeCacheEntry(dir, '@angular/compiler-cli', {
+        name: '@angular/compiler-cli',
+        distTags: { latest: '16.2.12' },
+        versions: {
+          '16.2.12': { version: '16.2.12', peerDependencies: { typescript: '>=4.9.3 <5.2.0' } },
+        },
+      });
+      await writeCacheEntry(dir, '@angular/cli', {
+        name: '@angular/cli',
+        distTags: { latest: '16.2.12' },
+        versions: {
+          '16.2.12': { version: '16.2.12' },
+        },
+      });
+      await writeCacheEntry(dir, '@angular/flex-layout', {
+        name: '@angular/flex-layout',
+        distTags: { latest: '15.0.0-beta.42' },
+        versions: {
+          '15.0.0-beta.42': {
+            version: '15.0.0-beta.42',
+            peerDependencies: { '@angular/core': '>=15.0.2' },
+            deprecated: 'Deprecated by Angular team',
+          },
+        },
+        time: { '15.0.0-beta.42': '2023-01-01T00:00:00.000Z' },
+      });
+
+      const softOut = io({ cwd: dir });
+      expect(await runCli(['analyze', '--fail-on-blockers', '--offline'], softOut.value)).toBe(ExitCode.Success);
+      expect(softOut.err()).toContain('[deprecated] @angular/flex-layout');
+
+      // Case 2: Hard blocker (package with no compatible version for Angular 16)
+      await writeFile(
+        path.join(dir, 'package.json'),
+        JSON.stringify({
+          name: 'hard-blocker-app',
+          dependencies: {
+            '@angular/core': '^15.2.0',
+            'strict-ng15-only': '1.0.0',
+          },
+        }),
+      );
+      await writeCacheEntry(dir, 'strict-ng15-only', {
+        name: 'strict-ng15-only',
+        distTags: { latest: '1.0.0' },
+        versions: {
+          '1.0.0': {
+            version: '1.0.0',
+            peerDependencies: { '@angular/core': '^15.0.0' },
+          },
+        },
+      });
+
+      const hardOut = io({ cwd: dir });
+      expect(await runCli(['analyze', '--fail-on-blockers', '--offline'], hardOut.value)).toBe(ExitCode.HardBlockers);
+      expect(hardOut.err()).toContain('NGM-4001');
+    } finally {
+      await cleanup();
+    }
   });
 });
 

@@ -31,6 +31,15 @@
     "category": "utility",
     "recommendation": "upgrade",
     "notes": "Official releases exist for newer Angular versions."
+  },
+  {
+    "package": "codelyzer",
+    "status": "deprecated",
+    "lastReleaseFor": 12,
+    "category": "tooling",
+    "recommendation": "alternate",
+    "alternatives": ["@angular-eslint/eslint-plugin", "eslint"],
+    "notes": "Codelyzer and TSLint are deprecated and have no releases past Angular 12; migrate to @angular-eslint/eslint-plugin."
   }
 ]
 

@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { run } from '../src/platform/process.js';
 import { acquireLock, lockPath, withLock } from '../src/state/lock.js';
 import { SCHEMA_VERSION, createState, readState, statePath, writeState } from '../src/state/state.js';
 import { TOOL_VERSION } from '../src/version.js';
@@ -84,6 +85,40 @@ describe('lock', () => {
     process.emit('exit', 1);
     await expect(readFile(lockPath(dir))).rejects.toMatchObject({ code: 'ENOENT' });
     await lock.release();
+  });
+
+  it('releases the lock file on SIGINT and SIGTERM where the platform allows', async () => {
+    const lock1 = await acquireLock(dir, 'plan');
+    process.emit('SIGINT', 'SIGINT');
+    await expect(readFile(lockPath(dir))).rejects.toMatchObject({ code: 'ENOENT' });
+    await lock1.release();
+
+    const lock2 = await acquireLock(dir, 'plan');
+    process.emit('SIGTERM', 'SIGTERM');
+    await expect(readFile(lockPath(dir))).rejects.toMatchObject({ code: 'ENOENT' });
+    await lock2.release();
+  });
+
+  it('detects a lock left by a killed child process as stale (NGM-3003) and shows the hint', async () => {
+    await mkdir(path.dirname(lockPath(dir)), { recursive: true });
+    // Spawn a real child process via src/platform/process.ts that writes a lock file with its real PID and then gets killed via timeoutMs
+    await run(
+      process.execPath,
+      [
+        '-e',
+        `const fs = require('node:fs'); const os = require('node:os'); fs.writeFileSync(${JSON.stringify(lockPath(dir))}, JSON.stringify({ pid: process.pid, hostname: os.hostname(), command: 'plan', startedAt: new Date().toISOString() })); setInterval(() => {}, 10000);`,
+      ],
+      { cwd: dir, timeoutMs: 150 },
+    );
+
+    const writtenLock = JSON.parse(await readFile(lockPath(dir), 'utf8')) as { pid: number };
+    expect(typeof writtenLock.pid).toBe('number');
+
+    await expect(acquireLock(dir, 'plan')).rejects.toMatchObject({
+      id: 'NGM-3003',
+      message: expect.stringContaining(`pid ${writtenLock.pid}`),
+      hint: 'Make sure no ng-migrator is running, then delete .ng-migrator/lock.',
+    });
   });
 });
 

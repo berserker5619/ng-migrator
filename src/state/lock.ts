@@ -77,11 +77,23 @@ export async function acquireLock(root: string, command: string, now: Date = new
       // ignore on exit
     }
   };
+  const onSigInt = () => {
+    onExitCleanup();
+    if (!process.env.VITEST) setTimeout(() => process.exit(130), 200).unref();
+  };
+  const onSigTerm = () => {
+    onExitCleanup();
+    if (!process.env.VITEST) setTimeout(() => process.exit(143), 200).unref();
+  };
   process.on('exit', onExitCleanup);
+  process.on('SIGINT', onSigInt);
+  process.on('SIGTERM', onSigTerm);
 
   return {
     async release() {
       process.off('exit', onExitCleanup);
+      process.off('SIGINT', onSigInt);
+      process.off('SIGTERM', onSigTerm);
       if (released) return;
       released = true;
       await removeWithRetry(file);

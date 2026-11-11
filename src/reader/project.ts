@@ -65,12 +65,93 @@ async function detectPackageManager(root: string, pkg: PackageJson, warnings: st
   return { name: 'npm', source: 'default' };
 }
 
+export function parseYarnLockVersions(content: string, names: readonly string[]): Map<string, string> {
+  const out = new Map<string, string>();
+  const lines = content.split(/\r?\n/);
+  let currentMatches: string[] = [];
+
+  for (const line of lines) {
+    if (!line.startsWith(' ') && line.endsWith(':')) {
+      currentMatches = [];
+      for (const name of names) {
+        if (out.has(name)) continue;
+        const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const headerRegex = new RegExp(`(?:^|["',\\s])${escaped}@(?:npm:)?[^"',:\\s]+`);
+        if (headerRegex.test(line)) {
+          currentMatches.push(name);
+        }
+      }
+      continue;
+    }
+    if (currentMatches.length > 0) {
+      const verMatch = /^\s+version(?::\s*|\s+)["']?([0-9]+\.[0-9]+\.[0-9]+[^"'\s]*)["']?/.exec(line);
+      if (verMatch && semver.valid(verMatch[1]!)) {
+        for (const matchedName of currentMatches) {
+          if (!out.has(matchedName)) {
+            out.set(matchedName, verMatch[1]!);
+          }
+        }
+        currentMatches = [];
+      }
+    }
+  }
+  return out;
+}
+
+export function parsePnpmLockVersions(content: string, names: readonly string[]): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const name of names) {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // Match pnpm v6/v9 dependency blocks:
+    //   '@angular/core':
+    //     specifier: ^15.2.0
+    //     version: 15.2.10(@angular/common@15.2.10)
+    // or inline: '@angular/core': 15.2.10
+    const blockRegex = new RegExp(
+      `['"]?${escaped}['"]?:\\s*(?:\\r?\\n\\s+specifier:[^\\r\\n]+\\r?\\n\\s+version:\\s*['"]?([0-9]+\\.[0-9]+\\.[0-9]+[^('"\\s]*)|['"]?([0-9]+\\.[0-9]+\\.[0-9]+[^('"\\s]*))`,
+      'm',
+    );
+    const m = blockRegex.exec(content);
+    const candidate = m?.[1] ?? m?.[2];
+    if (candidate && semver.valid(candidate)) {
+      out.set(name, candidate);
+      continue;
+    }
+    // Also match packages section keys like '/@angular/core@15.2.10:' or '@angular/core@15.2.10:' or '/@angular/core/15.2.10:'
+    const pkgKeyRegex = new RegExp(`['"]?/?${escaped}[@/]([0-9]+\\.[0-9]+\\.[0-9]+[^('"\\s:]*)`, 'm');
+    const pm = pkgKeyRegex.exec(content);
+    if (pm?.[1] && semver.valid(pm[1])) {
+      out.set(name, pm[1]);
+    }
+  }
+  return out;
+}
+
 async function installedVersions(root: string, names: string[], lock: PackageLock | undefined): Promise<Map<string, string>> {
   const out = new Map<string, string>();
+  let yarnMap: Map<string, string> | undefined;
+  let pnpmMap: Map<string, string> | undefined;
+
+  const yarnLockPath = path.join(root, 'yarn.lock');
+  if (await pathExists(yarnLockPath)) {
+    const raw = await readFile(yarnLockPath, 'utf8').catch(() => '');
+    if (raw) yarnMap = parseYarnLockVersions(raw, names);
+  }
+
+  const pnpmLockPath = path.join(root, 'pnpm-lock.yaml');
+  if (await pathExists(pnpmLockPath)) {
+    const raw = await readFile(pnpmLockPath, 'utf8').catch(() => '');
+    if (raw) pnpmMap = parsePnpmLockVersions(raw, names);
+  }
+
   for (const name of names) {
     const fromModules = await readJsonIfExists<PackageJson>(nodeModulesPackageJson(root, name)).catch(() => undefined);
     const version =
-      fromModules?.version ?? lock?.packages?.[`node_modules/${name}`]?.version ?? lock?.dependencies?.[name]?.version;
+      fromModules?.version ??
+      lock?.packages?.[`node_modules/${name}`]?.version ??
+      lock?.dependencies?.[name]?.version ??
+      pnpmMap?.get(name) ??
+      yarnMap?.get(name);
     if (version && semver.valid(version)) out.set(name, version);
   }
   return out;

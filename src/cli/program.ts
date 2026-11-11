@@ -41,6 +41,7 @@ interface GlobalOptions {
   color?: boolean;
   ascii?: boolean;
   verbose?: boolean;
+  project?: string;
 }
 
 export function parseTargetMajor(value: string): number {
@@ -54,12 +55,13 @@ export function parseTargetMajor(value: string): number {
   return major;
 }
 
-export function createProgram(io: CliIo, getOutput: () => Output): Command {
+export function createProgram(io: CliIo, getOutput: () => Output, getProjectRoot: () => string = () => io.cwd): Command {
   const program = new Command();
   program
     .name(TOOL_NAME)
     .description('Plan Angular upgrades one major version at a time (n-1 to n). Never commits.')
     .version(TOOL_VERSION, '-v, --version')
+    .option('--project <path>', 'path to the Angular project root (default: current directory)')
     .option('--no-color', 'plain output without colors')
     .option('--ascii', 'ASCII symbols only')
     .option('--verbose', 'print detailed output')
@@ -75,6 +77,7 @@ export function createProgram(io: CliIo, getOutput: () => Output): Command {
     .description('check the machine and project before starting')
     .action(async () => {
       const out = getOutput();
+      const projectRoot = getProjectRoot();
       out.info('Running pre-upgrade environment and project checks...\n');
 
       // 1. Node version
@@ -85,7 +88,7 @@ export function createProgram(io: CliIo, getOutput: () => Output): Command {
       }
 
       // 2. Git status
-      const git = await checkGitStatus(io.cwd);
+      const git = await checkGitStatus(projectRoot);
       if (!git.isGitRepo) {
         out.info('Git repository: not detected (working directory is clean).');
       } else if (git.clean) {
@@ -96,7 +99,7 @@ export function createProgram(io: CliIo, getOutput: () => Output): Command {
 
       // 3. Project read
       try {
-        const project = await readProject(io.cwd);
+        const project = await readProject(projectRoot);
         out.success(`Project: ${project.name ?? 'unnamed'} (Angular ${project.angular.version ?? 'unknown'})`);
         out.success(`Package manager: ${project.packageManager.name} (${project.packageManager.source})`);
         out.success(`Workspace structure: ${project.workspace}, style: ${project.style}`);
@@ -128,7 +131,8 @@ export function createProgram(io: CliIo, getOutput: () => Output): Command {
     .option('--offline', 'use cached registry data only')
     .action(async (opts: { failOnBlockers?: boolean; report?: string; offline?: boolean }) => {
       const out = getOutput();
-      const project = await readProject(io.cwd);
+      const projectRoot = getProjectRoot();
+      const project = await readProject(projectRoot);
 
       const currentMajor = project.angular.major;
       if (!currentMajor) {
@@ -136,21 +140,21 @@ export function createProgram(io: CliIo, getOutput: () => Output): Command {
       }
       const nextMajor = currentMajor + 1;
 
-      const { config: fileConfig } = await readConfigFile(io.cwd);
+      const { config: fileConfig } = await readConfigFile(projectRoot);
       const config = resolveConfig({}, fileConfig, { packageManager: project.packageManager.name });
-      const npmrc = await loadNpmrc(io.cwd, io.env);
+      const npmrc = await loadNpmrc(projectRoot, io.env);
       const registry = new RegistryClient({
         npmrc,
-        cacheDir: path.resolve(io.cwd, config.cacheDir),
+        cacheDir: path.resolve(projectRoot, config.cacheDir),
         offline: opts.offline,
         onWarning: (msg) => out.warn(msg),
       });
 
-      out.info(`Analyzing project: ${project.name ?? path.basename(io.cwd)}`);
+      out.info(`Analyzing project: ${project.name ?? path.basename(projectRoot)}`);
       out.info(`Current Angular: ${project.angular.version} (major ${currentMajor}) -> Target step: ${nextMajor}\n`);
 
       const requirements = await getStepRequirements(nextMajor, registry);
-      const rules = await loadRules(config.rules, io.cwd);
+      const rules = await loadRules(config.rules, projectRoot);
       const resolution = await resolveStepDependencies({
         project,
         requirements,
@@ -179,7 +183,8 @@ export function createProgram(io: CliIo, getOutput: () => Output): Command {
       }
 
       if (opts.report) {
-        const reportPath = path.resolve(io.cwd, opts.report);
+        const reportPath = path.resolve(projectRoot, opts.report);
+        const relReportPath = path.relative(projectRoot, reportPath).replace(/\\/g, '/') || opts.report;
         const reportData = {
           project: project.name,
           currentAngular: project.angular.version,
@@ -189,11 +194,12 @@ export function createProgram(io: CliIo, getOutput: () => Output): Command {
           heldBack: resolution.heldBack,
         };
         await writeGeneratedText(reportPath, `${JSON.stringify(reportData, null, 2)}\n`);
-        out.success(`Analysis report written to: ${reportPath}`);
+        out.success(`Analysis report written to: ${relReportPath}`);
       }
 
-      if (opts.failOnBlockers && resolution.blockers.some((b) => b.hard)) {
-        throw new NgmError('NGM-4001', `Found ${resolution.blockers.length} hard blocker(s) during analysis.`);
+      const hardBlockers = resolution.blockers.filter((b) => b.hard);
+      if (opts.failOnBlockers && hardBlockers.length > 0) {
+        throw new NgmError('NGM-4001', `Found ${hardBlockers.length} hard blocker(s) during analysis.`);
       }
     });
 
@@ -213,10 +219,11 @@ export function createProgram(io: CliIo, getOutput: () => Output): Command {
       allowDirty?: boolean;
     }) => {
       const out = getOutput();
+      const projectRoot = getProjectRoot();
       const targetMajor = parseTargetMajor(opts.to);
 
       // Check clean working tree
-      const git = await checkGitStatus(io.cwd);
+      const git = await checkGitStatus(projectRoot);
       if (git.isGitRepo && !git.clean && !opts.allowDirty) {
         throw new NgmError(
           'NGM-3001',
@@ -225,19 +232,19 @@ export function createProgram(io: CliIo, getOutput: () => Output): Command {
         );
       }
 
-      await withLock(io.cwd, 'plan', async () => {
-        const project = await readProject(io.cwd);
-        const { config: fileConfig } = await readConfigFile(io.cwd);
+      await withLock(projectRoot, 'plan', async () => {
+        const project = await readProject(projectRoot);
+        const { config: fileConfig } = await readConfigFile(projectRoot);
         const config = resolveConfig(
           { packageManager: opts.packageManager, rules: opts.rules },
           fileConfig,
           { packageManager: project.packageManager.name },
         );
 
-        const npmrc = await loadNpmrc(io.cwd, io.env);
+        const npmrc = await loadNpmrc(projectRoot, io.env);
         const registry = new RegistryClient({
           npmrc,
-          cacheDir: path.resolve(io.cwd, config.cacheDir),
+          cacheDir: path.resolve(projectRoot, config.cacheDir),
           offline: opts.offline,
           onWarning: (msg) => out.warn(msg),
         });
@@ -251,7 +258,14 @@ export function createProgram(io: CliIo, getOutput: () => Output): Command {
           verifyResolution: !opts.offline,
         });
 
-        await writePlanDocuments(io.cwd, plan, project.hasNodeModules);
+        const step1Res = plan.steps[0]?.resolution;
+        if (step1Res && step1Res.tempDir) {
+          out.debug(
+            `Resolution check ran in temp dir: ${step1Res.tempDir} (copied: [${(step1Res.copiedFiles ?? []).join(', ')}], status: ${step1Res.status}, deleted afterwards: ${String(step1Res.tempDirCleaned)})`,
+          );
+        }
+
+        await writePlanDocuments(projectRoot, plan, project.hasNodeModules);
 
         out.success(`\nPlan generated successfully (${plan.steps.length} step(s)):`);
         for (const s of plan.steps) {
@@ -271,7 +285,8 @@ export function createProgram(io: CliIo, getOutput: () => Output): Command {
     .description('show which steps are planned, approved, done or failed')
     .action(async () => {
       const out = getOutput();
-      const state = await readState(io.cwd);
+      const projectRoot = getProjectRoot();
+      const state = await readState(projectRoot);
       if (!state || state.steps.length === 0) {
         out.info('No active migration plan found.');
         out.info('Run "ng-migrator plan --to <major>" to generate a plan.');
@@ -301,13 +316,14 @@ export function createProgram(io: CliIo, getOutput: () => Output): Command {
     .argument('<step>', 'step number')
     .action(async (stepArg: string) => {
       const out = getOutput();
+      const projectRoot = getProjectRoot();
       if (!/^\d+$/.test(stepArg) || Number(stepArg) < 1) {
         throw new NgmError('NGM-2001', `Step must be a positive number, not "${stepArg}".`);
       }
       const stepIndex = Number(stepArg);
 
-      await withLock(io.cwd, 'approve', async () => {
-        const state = await readState(io.cwd);
+      await withLock(projectRoot, 'approve', async () => {
+        const state = await readState(projectRoot);
         if (!state) {
           throw new NgmError('NGM-3005', 'No migration state found. Run "ng-migrator plan --to <major>" first.');
         }
@@ -318,7 +334,7 @@ export function createProgram(io: CliIo, getOutput: () => Output): Command {
         }
 
         const stepFileName = `${String(step.index).padStart(2, '0')}-angular-${step.from}-to-${step.to}.md`;
-        const stepFilePath = path.join(io.cwd, '.ng-migrator', 'steps', stepFileName);
+        const stepFilePath = path.join(projectRoot, '.ng-migrator', 'steps', stepFileName);
         const { decisions, reviewerNotes } = await extractDecisionsFromFile(stepFilePath);
 
         step.decisions = { ...step.decisions, ...decisions };
@@ -333,7 +349,7 @@ export function createProgram(io: CliIo, getOutput: () => Output): Command {
         step.status = 'approved';
         step.approvedAt = new Date().toISOString();
 
-        await writeState(io.cwd, state);
+        await writeState(projectRoot, state);
 
         // Re-read step file to update approval status line
         try {
@@ -357,11 +373,16 @@ export function createProgram(io: CliIo, getOutput: () => Output): Command {
 
 export async function runCli(argv: readonly string[], io: CliIo): Promise<number> {
   let output = new Output(io.stdout, io.stderr, { color: shouldUseColor(undefined, io.isTTY, io.env), ascii: false, verbose: false });
+  let projectRoot = io.cwd;
   const getOutput = () => output;
+  const getProjectRoot = () => projectRoot;
 
-  const program = createProgram(io, getOutput);
+  const program = createProgram(io, getOutput, getProjectRoot);
   program.hook('preAction', (thisCommand) => {
     const g = thisCommand.optsWithGlobals<GlobalOptions>();
+    if (g.project) {
+      projectRoot = path.resolve(io.cwd, g.project);
+    }
     output = new Output(io.stdout, io.stderr, {
       color: shouldUseColor(g.color, io.isTTY, io.env),
       ascii: Boolean(g.ascii),

@@ -79,6 +79,7 @@ export interface RunOptions {
   /** Prefix such as `fnm exec --using 16 --`, used to run under a step's Node version. */
   commandPrefix?: string;
   input?: string;
+  cancelSignal?: AbortSignal;
 }
 
 export interface RunResult {
@@ -123,7 +124,8 @@ export async function run(command: string, args: readonly string[], options: Run
     stripFinalNewline: true,
     windowsHide: true,
     ...(options.timeoutMs === undefined ? {} : { timeout: options.timeoutMs }),
-    ...(options.input === undefined ? { stdin: 'ignore' as const } : { input: options.input }),
+    ...(options.input === undefined ? {} : { input: options.input }),
+    ...(options.cancelSignal === undefined ? {} : { cancelSignal: options.cancelSignal }),
   });
 
   return {

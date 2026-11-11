@@ -60,3 +60,4 @@ jobs:
           node "$GITHUB_WORKSPACE/dist/cli.js" doctor
           node "$GITHUB_WORKSPACE/dist/cli.js" analyze
           node "$GITHUB_WORKSPACE/dist/cli.js" plan --to ${{ matrix.entry.targetAngular }}
+

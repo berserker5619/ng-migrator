@@ -390,9 +390,14 @@ describe('synthetic corpus fixtures', () => {
       }
     }
 
-    const ciEligible = baselines.filter(
-      (b) => b.tier === 'ci' && b.ci === true && b.nightly === true && b.license !== 'unknown',
-    );
-    expect(ciEligible.map((b) => b.name)).toEqual(['angular-14-login']);
+    const ciEligible = baselines
+      .filter((b) => b.tier === 'ci' && b.ci === true && b.nightly === true && b.license !== 'unknown')
+      .map((b) => String(b.name))
+      .sort();
+    expect(ciEligible).toEqual([
+      'angular-14-login',
+      'angular-15-signup-boilerplate',
+      'k8s-istio-observe-frontend',
+    ]);
   });
 });

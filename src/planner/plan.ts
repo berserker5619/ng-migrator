@@ -79,8 +79,62 @@ export async function createPlan(options: PlanOptions): Promise<Plan> {
         projectRoot: project.root,
         packageManager: config.packageManager,
         changes: stepResolution.changes,
-        commandPrefix: typeof config.commandPrefix === 'string' ? config.commandPrefix : config.commandPrefix?.[String(toMajor)],
       });
+    }
+
+    if (resolutionCheck.status === 'conflict') {
+      const overrideKey =
+        config.packageManager === 'yarn'
+          ? 'resolutions'
+          : config.packageManager === 'pnpm'
+            ? 'pnpm.overrides'
+            : 'overrides';
+
+      const conflicts = resolutionCheck.conflicts ?? [];
+      if (conflicts.length > 0) {
+        for (const conflict of conflicts) {
+          const pkgName = conflict.requiredBy.replace(/@[^@]+$/, '');
+          const optionsList = [
+            `Swap ${pkgName} for a compatible package or version supporting ${conflict.peer} in Angular ${toMajor}.`,
+            `Add an explicit override in package.json under "${overrideKey}" for "${conflict.peer}".`,
+          ];
+          const conflictDetails = `ERESOLVE peer dependency conflict: ${conflict.requiredBy} requires peer ${conflict.peer}@"${conflict.range}"${conflict.found ? `, but found ${conflict.found}` : ''}.`;
+
+          const existing = stepResolution.blockers.find(
+            (b) => b.package === pkgName && b.reason === 'peer-conflict',
+          );
+          if (!existing) {
+            stepResolution.blockers.push({
+              package: pkgName,
+              reason: 'peer-conflict',
+              hard: true,
+              details: conflictDetails,
+              recommendedFix: `Swap ${pkgName} or add an explicit override in package.json (${overrideKey})`,
+              source: 'analysis',
+              confidence: 'high',
+              effort: '15 to 30 minutes',
+              runnerUp: `Add explicit override in package.json under "${overrideKey}"`,
+              options: optionsList,
+            });
+          }
+        }
+      } else {
+        stepResolution.blockers.push({
+          package: 'peer-resolution',
+          reason: 'peer-conflict',
+          hard: true,
+          details: resolutionCheck.detail ?? 'Package manager reported peer dependency conflict during resolution check.',
+          recommendedFix: `Swap conflicting package or add an explicit override in package.json (${overrideKey})`,
+          source: 'analysis',
+          confidence: 'medium',
+          effort: '15 to 30 minutes',
+          runnerUp: `Add explicit override in package.json under "${overrideKey}"`,
+          options: [
+            'Swap the conflicting package for a compatible alternative.',
+            `Add an explicit override in package.json under "${overrideKey}".`,
+          ],
+        });
+      }
     }
 
     const actions: string[] = [];

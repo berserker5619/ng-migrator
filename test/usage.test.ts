@@ -1,6 +1,10 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { Blocker } from '../src/model.js';
+import type { RegistryClient } from '../src/registry/client.js';
+import { computeRecommendation } from '../src/recommend/engine.js';
+import { getBuiltInRules } from '../src/recommend/rules.js';
 import { analyzePackageUsage } from '../src/recommend/usage.js';
 import { tempProject } from './helpers.js';
 
@@ -75,6 +79,208 @@ describe('usage analysis', () => {
     expect(footprint.importedSymbols).toEqual(['FlexLayoutModule']);
     expect(footprint.files).toEqual(['src/app/app.module.ts', 'src/app/header.component.ts']);
     expect(footprint.templateOccurrences).toBe(3);
+  });
+
+  describe('unused-dependency guard fixtures', () => {
+    const mockRegistry = {
+      packument: async () => undefined,
+    } as unknown as RegistryClient;
+
+    it('Fixture: used only in angular.json styles -> does not recommend remove', async () => {
+      await mkdir(path.join(dir, 'src', 'app'), { recursive: true });
+      await writeFile(
+        path.join(dir, 'package.json'),
+        JSON.stringify({
+          name: 'app-styles-only',
+          dependencies: { '@angular/core': '^15.2.0', '@angular/flex-layout': '^15.0.0-beta.42' },
+        }),
+      );
+      await writeFile(
+        path.join(dir, 'angular.json'),
+        JSON.stringify({
+          projects: {
+            app: {
+              architect: {
+                build: {
+                  options: {
+                    styles: ['node_modules/@angular/flex-layout/prebuilt.css', 'src/styles.scss'],
+                  },
+                },
+              },
+            },
+          },
+        }),
+      );
+      await writeFile(path.join(dir, 'src', 'app', 'app.component.ts'), 'export class AppComponent {}');
+
+      const blocker: Blocker = {
+        package: '@angular/flex-layout',
+        reason: 'deprecated',
+        hard: false,
+        details: 'Deprecated',
+      };
+      const rec = await computeRecommendation({
+        projectRoot: dir,
+        blocker,
+        targetMajor: 16,
+        targetCoreVersion: '16.2.12',
+        registry: mockRegistry,
+        rules: getBuiltInRules(),
+      });
+
+      expect(rec.recommendation).not.toBe('remove');
+      expect(rec.recommendedFix).toBe('CSS flexbox/grid');
+      expect(rec.usage?.summary).toContain('configs: [angular.json]');
+    });
+
+    it('Fixture: used only as a peer dependency of another installed package -> does not recommend remove', async () => {
+      await mkdir(path.join(dir, 'src', 'app'), { recursive: true });
+      await mkdir(path.join(dir, 'node_modules', 'ngx-layout-wrapper'), { recursive: true });
+      await writeFile(
+        path.join(dir, 'package.json'),
+        JSON.stringify({
+          name: 'app-peer-only',
+          dependencies: {
+            '@angular/core': '^15.2.0',
+            '@angular/flex-layout': '^15.0.0-beta.42',
+            'ngx-layout-wrapper': '^1.0.0',
+          },
+        }),
+      );
+      await writeFile(
+        path.join(dir, 'node_modules', 'ngx-layout-wrapper', 'package.json'),
+        JSON.stringify({
+          name: 'ngx-layout-wrapper',
+          version: '1.0.0',
+          peerDependencies: { '@angular/flex-layout': '^15.0.0-beta.42' },
+        }),
+      );
+      await writeFile(path.join(dir, 'src', 'app', 'app.component.ts'), 'export class AppComponent {}');
+
+      const blocker: Blocker = {
+        package: '@angular/flex-layout',
+        reason: 'deprecated',
+        hard: false,
+        details: 'Deprecated',
+      };
+      const rec = await computeRecommendation({
+        projectRoot: dir,
+        blocker,
+        targetMajor: 16,
+        targetCoreVersion: '16.2.12',
+        registry: mockRegistry,
+        rules: getBuiltInRules(),
+      });
+
+      expect(rec.recommendation).not.toBe('remove');
+      expect(rec.recommendedFix).toBe('CSS flexbox/grid');
+      expect(rec.usage?.summary).toContain('peer dependency of: [ngx-layout-wrapper]');
+    });
+
+    it('Fixture: used only in an scss @use/@import -> does not recommend remove', async () => {
+      await mkdir(path.join(dir, 'src', 'app'), { recursive: true });
+      await writeFile(
+        path.join(dir, 'package.json'),
+        JSON.stringify({
+          name: 'app-scss-only',
+          dependencies: { '@angular/core': '^15.2.0', '@angular/flex-layout': '^15.0.0-beta.42' },
+        }),
+      );
+      await writeFile(path.join(dir, 'src', 'styles.scss'), `@use '@angular/flex-layout/mq' as mq;\n`);
+      await writeFile(path.join(dir, 'src', 'app', 'app.component.ts'), 'export class AppComponent {}');
+
+      const blocker: Blocker = {
+        package: '@angular/flex-layout',
+        reason: 'deprecated',
+        hard: false,
+        details: 'Deprecated',
+      };
+      const rec = await computeRecommendation({
+        projectRoot: dir,
+        blocker,
+        targetMajor: 16,
+        targetCoreVersion: '16.2.12',
+        registry: mockRegistry,
+        rules: getBuiltInRules(),
+      });
+
+      expect(rec.recommendation).not.toBe('remove');
+      expect(rec.recommendedFix).toBe('CSS flexbox/grid');
+      expect(rec.usage?.summary).toContain('style imports: [src/styles.scss]');
+    });
+
+    it('Fixture: truly unused across workspace, configs, styles, and peers -> recommends "remove the unused dependency" with high confidence', async () => {
+      await mkdir(path.join(dir, 'src', 'app'), { recursive: true });
+      await mkdir(path.join(dir, 'projects', 'sub-app', 'src'), { recursive: true });
+      await writeFile(
+        path.join(dir, 'package.json'),
+        JSON.stringify({
+          name: 'app-truly-unused',
+          scripts: { build: 'ng build' },
+          dependencies: { '@angular/core': '^15.2.0', '@angular/flex-layout': '^15.0.0-beta.42' },
+        }),
+      );
+      await writeFile(path.join(dir, 'angular.json'), JSON.stringify({ projects: { app: {} } }));
+      await writeFile(path.join(dir, 'tsconfig.json'), JSON.stringify({ compilerOptions: { paths: {} } }));
+      await writeFile(path.join(dir, 'src', 'styles.scss'), 'body { margin: 0; }');
+      await writeFile(path.join(dir, 'src', 'app', 'app.component.ts'), 'export class AppComponent {}');
+      await writeFile(path.join(dir, 'projects', 'sub-app', 'src', 'main.ts'), 'export const x = 1;');
+
+      const blocker: Blocker = {
+        package: '@angular/flex-layout',
+        reason: 'deprecated',
+        hard: false,
+        details: 'Deprecated',
+      };
+      const rec = await computeRecommendation({
+        projectRoot: dir,
+        blocker,
+        targetMajor: 16,
+        targetCoreVersion: '16.2.12',
+        registry: mockRegistry,
+        rules: getBuiltInRules(),
+      });
+
+      expect(rec.recommendation).toBe('remove');
+      expect(rec.recommendedFix).toBe('remove the unused dependency');
+      expect(rec.confidence).toBe('high');
+      expect(rec.runnerUp).toBe('CSS flexbox/grid, Tailwind CSS');
+    });
+
+    it('Fixture: unused in source but peer check cannot be done (missing node_modules and lockfile with other 3rd-party deps) -> medium confidence "appears unused, verify"', async () => {
+      await mkdir(path.join(dir, 'src', 'app'), { recursive: true });
+      await writeFile(
+        path.join(dir, 'package.json'),
+        JSON.stringify({
+          name: 'app-unverifiable-peers',
+          dependencies: {
+            '@angular/core': '^15.2.0',
+            '@angular/flex-layout': '^15.0.0-beta.42',
+            'mystery-ui-kit': '^2.0.0',
+          },
+        }),
+      );
+      await writeFile(path.join(dir, 'src', 'app', 'app.component.ts'), 'export class AppComponent {}');
+
+      const blocker: Blocker = {
+        package: '@angular/flex-layout',
+        reason: 'deprecated',
+        hard: false,
+        details: 'Deprecated',
+      };
+      const rec = await computeRecommendation({
+        projectRoot: dir,
+        blocker,
+        targetMajor: 16,
+        targetCoreVersion: '16.2.12',
+        registry: mockRegistry,
+        rules: getBuiltInRules(),
+      });
+
+      expect(rec.recommendation).toBe('remove');
+      expect(rec.recommendedFix).toBe('appears unused, verify');
+      expect(rec.confidence).toBe('medium');
+    });
   });
 });
 

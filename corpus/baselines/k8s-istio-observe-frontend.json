@@ -1,0 +1,116 @@
+{
+  "name": "k8s-istio-observe-frontend",
+  "repository": "https://github.com/garystafford/k8s-istio-observe-frontend",
+  "commit": "1e13e3e9bb40fa7b5f5c0e3df8f14f7ed245b3df",
+  "license": "MIT",
+  "tier": "ci",
+  "ci": true,
+  "nightly": true,
+  "startingAngular": "12.0.1",
+  "targetAngular": 16,
+  "steps": [
+    {
+      "step": 1,
+      "from": 12,
+      "to": 13,
+      "expectedBlockers": [
+        {
+          "package": "codelyzer",
+          "reason": "no-compatible-version",
+          "hard": true,
+          "expectedRecommendation": {
+            "recommendation": "alternate",
+            "recommendedFix": "@angular-eslint/eslint-plugin",
+            "source": "rule",
+            "confidence": "high",
+            "runnerUp": "eslint",
+            "usageFootprint": {
+              "filesCount": 1,
+              "templateUsages": 0,
+              "importedSymbols": []
+            }
+          }
+        },
+        {
+          "package": "ngx-logger",
+          "reason": "unmaintained",
+          "hard": false,
+          "evidence": "declared",
+          "unmaintained": true,
+          "expectedRecommendation": {
+            "recommendation": "upgrade",
+            "recommendedFix": "Upgrade to declared-compatible release and monitor maintenance risk",
+            "source": "analysis",
+            "confidence": "medium",
+            "runnerUp": "replace with maintained alternative or in-project utility",
+            "usageFootprint": {
+              "filesCount": 3,
+              "templateUsages": 0,
+              "importedSymbols": ["LoggerModule", "NGXLogger", "NgxLoggerLevel"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "step": 2,
+      "from": 13,
+      "to": 14,
+      "provisional": true,
+      "expectedBlockers": [
+        {
+          "package": "codelyzer",
+          "reason": "no-compatible-version",
+          "hard": true
+        },
+        {
+          "package": "ngx-logger",
+          "reason": "unmaintained",
+          "hard": false,
+          "evidence": "declared",
+          "unmaintained": true
+        }
+      ]
+    },
+    {
+      "step": 3,
+      "from": 14,
+      "to": 15,
+      "provisional": true,
+      "expectedBlockers": [
+        {
+          "package": "codelyzer",
+          "reason": "no-compatible-version",
+          "hard": true
+        },
+        {
+          "package": "ngx-logger",
+          "reason": "unmaintained",
+          "hard": false,
+          "evidence": "declared",
+          "unmaintained": true
+        }
+      ]
+    },
+    {
+      "step": 4,
+      "from": 15,
+      "to": 16,
+      "provisional": true,
+      "expectedBlockers": [
+        {
+          "package": "codelyzer",
+          "reason": "no-compatible-version",
+          "hard": true
+        },
+        {
+          "package": "ngx-logger",
+          "reason": "unmaintained",
+          "hard": false,
+          "evidence": "declared",
+          "unmaintained": true
+        }
+      ]
+    }
+  ]
+}

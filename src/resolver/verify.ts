@@ -1,3 +1,4 @@
+import { rmSync } from 'node:fs';
 import { copyFile, mkdtemp, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -10,11 +11,11 @@ export interface VerifyResolutionOptions {
   projectRoot: string;
   packageManager: PackageManager;
   changes: PackageChange[];
-  commandPrefix?: string;
+  onTempDirReady?: (info: { tempDir: string; copiedFiles: string[] }) => void;
 }
 
 /**
- * Parses npm ERESOLVE peer dependency error messages from stderr.
+ * Parses npm ERESOLVE (and pnpm / yarn) peer dependency error messages from output.
  * Example npm output:
  *   npm error While resolving: @angular/material@15.2.0
  *   npm error Found: @angular/core@16.2.0
@@ -23,17 +24,67 @@ export interface VerifyResolutionOptions {
  */
 export function parseNpmEresolve(output: string): PeerConflict[] {
   const conflicts: PeerConflict[] = [];
-  const lines = output.split('\n');
+  const lines = output.split(/\r?\n/);
+  let lastFound: string | undefined;
+  let lastWhileResolving: string | undefined;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!;
-    // Match "peer @angular/core@"^15.0.0" from @angular/material@15.2.0"
-    const match = /peer\s+([@\w/-]+)@["']([^"']+)["']\s+from\s+([@\w/-]+@[\d\w.-]+)/i.exec(line);
-    if (match) {
+
+    const whileMatch = /While resolving:\s+([@\w/.-]+@[\d\w.-]+)/i.exec(line);
+    if (whileMatch) {
+      lastWhileResolving = whileMatch[1]!;
+    }
+
+    const foundMatch = /Found:\s+([@\w/.-]+@[\d\w.-]+)/i.exec(line);
+    if (foundMatch) {
+      lastFound = foundMatch[1]!;
+    }
+
+    // Match npm: 'peer @angular/core@"^15.0.0" from @angular/material@15.2.0'
+    const npmMatch = /peer\s+([@\w/.-]+)@["']([^"']+)["']\s+from\s+([@\w/.-]+@[\d\w.-]+)/i.exec(line);
+    if (npmMatch) {
       conflicts.push({
-        peer: match[1]!,
-        range: match[2]!,
-        requiredBy: match[3]!,
+        peer: npmMatch[1]!,
+        range: npmMatch[2]!,
+        requiredBy: npmMatch[3]!,
+        ...(lastFound ? { found: lastFound } : {}),
+      });
+      continue;
+    }
+
+    // Match pnpm: '✕ unmet peer @angular/core@"^15.0.0": found 16.2.12' (under package header)
+    const pnpmParentMatch = /^[\s└├│─┬]+([@\w/.-]+)\s+([\d]+\.[\d]+\.[\d]+[\w.-]*)\s*$/i.exec(line);
+    if (pnpmParentMatch) {
+      lastWhileResolving = `${pnpmParentMatch[1]}@${pnpmParentMatch[2]}`;
+    }
+    const pnpmPeerMatch = /unmet peer\s+([@\w/.-]+)@["']?([^"':]+)["']?:\s*found\s+([\d\w.-]+)/i.exec(line);
+    if (pnpmPeerMatch && lastWhileResolving) {
+      conflicts.push({
+        peer: pnpmPeerMatch[1]!,
+        range: pnpmPeerMatch[2]!.trim(),
+        requiredBy: lastWhileResolving,
+        found: `${pnpmPeerMatch[1]}@${pnpmPeerMatch[3]}`,
+      });
+      continue;
+    }
+
+    // Match yarn: 'ngx-foo@3.1.0 requires a peer of @angular/core@^15.0.0' or 'warning " > pkg@1.0.0" has incorrect peer dependency "@angular/core@^15.0.0"'
+    const yarnPeerMatch = /([@\w/.-]+@[\d\w.-]+)\s+requires a peer of\s+([@\w/.-]+)@["']?([^\s"']+)["']?/i.exec(line);
+    if (yarnPeerMatch) {
+      conflicts.push({
+        peer: yarnPeerMatch[2]!,
+        range: yarnPeerMatch[3]!,
+        requiredBy: yarnPeerMatch[1]!,
+      });
+      continue;
+    }
+    const yarnIncorrectMatch = /([@\w/.-]+@[\d\w.-]+)["']?\s+has incorrect peer dependency\s+["']([@\w/.-]+)@([^"']+)["']/i.exec(line);
+    if (yarnIncorrectMatch) {
+      conflicts.push({
+        peer: yarnIncorrectMatch[2]!,
+        range: yarnIncorrectMatch[3]!,
+        requiredBy: yarnIncorrectMatch[1]!,
       });
     }
   }
@@ -43,15 +94,44 @@ export function parseNpmEresolve(output: string): PeerConflict[] {
 
 /**
  * Verifies proposed dependency versions by running a lockfile-only dry run
- * in a temporary directory holding copies of the manifest and lockfile (plan section 7.3).
- * Never touches the real project directory.
+ * in a temporary directory holding copies of the manifest, lockfile, and .npmrc (plan section 7.3).
+ * Never touches the real project directory, and cleans up the temp directory even on process interruption.
  */
 export async function verifyWithPackageManager(
   options: VerifyResolutionOptions,
 ): Promise<ResolutionCheck> {
-  const { projectRoot, packageManager, changes, commandPrefix } = options;
+  const { projectRoot, packageManager, changes, onTempDirReady } = options;
 
   let tempDir: string | undefined;
+  let cleaned = false;
+  let interruptedExitCode: number | undefined;
+  const abortController = new AbortController();
+  const copiedFiles: string[] = [];
+
+  const cleanupTempSync = () => {
+    if (cleaned || !tempDir) return;
+    cleaned = true;
+    try {
+      rmSync(tempDir, { recursive: true, force: true });
+    } catch {
+      // ignore on exit
+    }
+  };
+  const onSigInt = () => {
+    interruptedExitCode = 130;
+    abortController.abort();
+    cleanupTempSync();
+  };
+  const onSigTerm = () => {
+    interruptedExitCode = 143;
+    abortController.abort();
+    cleanupTempSync();
+  };
+
+  process.on('exit', cleanupTempSync);
+  process.on('SIGINT', onSigInt);
+  process.on('SIGTERM', onSigTerm);
+
   try {
     tempDir = await mkdtemp(path.join(os.tmpdir(), 'ngm-resolve-'));
 
@@ -82,12 +162,27 @@ export async function verifyWithPackageManager(
       path.join(tempDir, 'package.json'),
       `${JSON.stringify(modifiedPkg, null, 2)}\n`,
     );
+    copiedFiles.push('package.json');
 
     // Copy lockfiles if present
     for (const lockfile of ['package-lock.json', 'yarn.lock', 'pnpm-lock.yaml']) {
       const src = path.join(projectRoot, lockfile);
       if (await pathExists(src)) {
-        await copyFile(src, path.join(tempDir, lockfile)).catch(() => undefined);
+        const dest = path.join(tempDir, lockfile);
+        await copyFile(src, dest).catch(() => undefined);
+        copiedFiles.push(lockfile);
+        if (lockfile === 'package-lock.json' && changes.length > 0) {
+          const lockJson = await readJsonIfExists<Record<string, unknown>>(dest).catch(() => undefined);
+          if (lockJson) {
+            const pkgs = lockJson.packages as Record<string, unknown> | undefined;
+            const lockDeps = lockJson.dependencies as Record<string, unknown> | undefined;
+            for (const change of changes) {
+              if (pkgs) delete pkgs[`node_modules/${change.name}`];
+              if (lockDeps) delete lockDeps[change.name];
+            }
+            await writeFile(dest, `${JSON.stringify(lockJson, null, 2)}\n`).catch(() => undefined);
+          }
+        }
       }
     }
 
@@ -95,7 +190,10 @@ export async function verifyWithPackageManager(
     const npmrcSrc = path.join(projectRoot, '.npmrc');
     if (await pathExists(npmrcSrc)) {
       await copyFile(npmrcSrc, path.join(tempDir, '.npmrc')).catch(() => undefined);
+      copiedFiles.push('.npmrc');
     }
+
+    onTempDirReady?.({ tempDir, copiedFiles: [...copiedFiles] });
 
     // Run lockfile-only check
     let cmd = 'npm';
@@ -109,25 +207,50 @@ export async function verifyWithPackageManager(
       args = ['install', '--mode', 'update-lockfile', '--ignore-scripts'];
     }
 
-    const result = await run(cmd, args, { cwd: tempDir, commandPrefix });
+    const result = await run(cmd, args, { cwd: tempDir, cancelSignal: abortController.signal });
+
+    await removeWithRetry(tempDir).catch(() => undefined);
+    cleaned = true;
+    const tempDirCleaned = !(await pathExists(tempDir));
+
+    if (interruptedExitCode !== undefined && !process.env.VITEST) {
+      process.exit(interruptedExitCode);
+    }
 
     if (result.exitCode === 0) {
-      return { status: 'confirmed' };
+      return {
+        status: 'confirmed',
+        tempDir,
+        copiedFiles,
+        tempDirCleaned,
+      };
     }
 
     const fullOutput = `${result.stdout}\n${result.stderr}`;
-    if (fullOutput.includes('ERESOLVE') || fullOutput.includes('Could not resolve dependency')) {
+    if (
+      fullOutput.includes('ERESOLVE') ||
+      fullOutput.includes('Could not resolve dependency') ||
+      fullOutput.includes('ERR_PNPM_PEER_DEP_ISSUES') ||
+      fullOutput.includes('unmet peer') ||
+      fullOutput.includes('requires a peer of')
+    ) {
       const conflicts = parseNpmEresolve(fullOutput);
       return {
         status: 'conflict',
         detail: 'Peer dependency conflict during resolution check.',
         conflicts: conflicts.length > 0 ? conflicts : undefined,
+        tempDir,
+        copiedFiles,
+        tempDirCleaned,
       };
     }
 
     return {
       status: 'failed',
       detail: result.stderr.trim() || result.stdout.trim() || `Package manager exited with code ${result.exitCode}`,
+      tempDir,
+      copiedFiles,
+      tempDirCleaned,
     };
   } catch (err) {
     return {
@@ -135,9 +258,12 @@ export async function verifyWithPackageManager(
       detail: (err as Error).message,
     };
   } finally {
-    if (tempDir) {
+    process.off('exit', cleanupTempSync);
+    process.off('SIGINT', onSigInt);
+    process.off('SIGTERM', onSigTerm);
+    if (tempDir && !cleaned) {
+      cleaned = true;
       await removeWithRetry(tempDir).catch(() => undefined);
     }
   }
 }
-

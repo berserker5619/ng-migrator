@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { walkProject } from '../src/reader/files.js';
@@ -159,5 +159,59 @@ describe('readProject', () => {
     expect(info.overrides).toEqual(['legacy-pkg']);
     expect(info.ngccScripts).toEqual(['postinstall']);
     expect(info.viewEngineSuspects).toContain('ve-lib');
+  });
+
+  it('reads installed versions from yarn.lock when node_modules is missing', async () => {
+    await writeFile(
+      path.join(dir, 'package.json'),
+      JSON.stringify({
+        name: 'yarn-app',
+        dependencies: {
+          '@angular/core': '^15.2.0',
+          'ngx-toastr': '^16.0.0',
+        },
+      }),
+    );
+    await copyFile(
+      path.resolve(__dirname, 'fixtures', 'lockfiles', 'yarn.lock'),
+      path.join(dir, 'yarn.lock'),
+    );
+
+    const info = await readProject(dir);
+    expect(info.packageManager).toEqual({
+      name: 'yarn',
+      source: 'lockfile',
+      lockfile: 'yarn.lock',
+    });
+    expect(info.hasNodeModules).toBe(false);
+    expect(info.angular).toMatchObject({ version: '15.2.10', major: 15 });
+    expect(info.dependencies.find((d) => d.name === 'ngx-toastr')?.installed).toBe('16.2.0');
+  });
+
+  it('reads installed versions from pnpm-lock.yaml when node_modules is missing', async () => {
+    await writeFile(
+      path.join(dir, 'package.json'),
+      JSON.stringify({
+        name: 'pnpm-app',
+        dependencies: {
+          '@angular/core': '^16.0.0',
+          'ngx-spinner': '^16.0.0',
+        },
+      }),
+    );
+    await copyFile(
+      path.resolve(__dirname, 'fixtures', 'lockfiles', 'pnpm-lock.yaml'),
+      path.join(dir, 'pnpm-lock.yaml'),
+    );
+
+    const info = await readProject(dir);
+    expect(info.packageManager).toEqual({
+      name: 'pnpm',
+      source: 'lockfile',
+      lockfile: 'pnpm-lock.yaml',
+    });
+    expect(info.hasNodeModules).toBe(false);
+    expect(info.angular).toMatchObject({ version: '16.2.12', major: 16 });
+    expect(info.dependencies.find((d) => d.name === 'ngx-spinner')?.installed).toBe('16.0.2');
   });
 });

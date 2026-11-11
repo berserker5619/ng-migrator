@@ -102,6 +102,65 @@ describe('steps writer and decision tracking', () => {
     expect(doc).toContain('Status: pending. Run: npx ng-migrator approve 1');
   });
 
+  it('renders manifest diff preview keeping caret, tilde, and exact range styles, and renders ERESOLVE options', () => {
+    const stepWithStylesAndConflict: PlannedStep = {
+      ...sampleStep,
+      changes: [
+        {
+          name: '@angular/core',
+          type: 'dependencies',
+          current: '15.2.10',
+          currentSpec: '^15.2.0',
+          target: '16.2.12',
+          targetSpec: '^16.2.12',
+          reason: 'Target major 16',
+          evidence: 'declared',
+        },
+        {
+          name: 'zone.js',
+          type: 'dependencies',
+          current: '0.12.0',
+          currentSpec: '~0.12.0',
+          target: '0.13.3',
+          targetSpec: '~0.13.3',
+          reason: 'Angular 16 requirement (~0.13.0)',
+          evidence: 'declared',
+        },
+        {
+          name: 'typescript',
+          type: 'devDependencies',
+          current: '4.9.5',
+          currentSpec: '4.9.5',
+          target: '5.1.6',
+          targetSpec: '5.1.6',
+          reason: 'Angular 16 requirement (>=4.9.3 <5.2.0)',
+          evidence: 'declared',
+        },
+      ],
+      blockers: [
+        {
+          package: 'legacy-chart',
+          reason: 'peer-conflict',
+          hard: true,
+          details: 'ERESOLVE: legacy-chart@1.2.0 requires peer @angular/core@"^15.0.0" (found @angular/core@16.2.12).',
+          options: [
+            'Option 1 (Swap package): Replace legacy-chart with an Angular 16-compatible release or alternative library.',
+            'Option 2 (Explicit override): Add "@angular/core": "^16.2.12" under "overrides" in package.json to force resolution.',
+          ],
+        },
+      ],
+    };
+
+    const doc = formatStepDocument(stepWithStylesAndConflict);
+    expect(doc).toContain('## Manifest changes (package.json preview)');
+    expect(doc).toContain('- "@angular/core": "^15.2.0"\n+ "@angular/core": "^16.2.12"');
+    expect(doc).toContain('- "zone.js": "~0.12.0"\n+ "zone.js": "~0.13.3"');
+    expect(doc).toContain('- "typescript": "4.9.5"\n+ "typescript": "5.1.6"');
+    expect(doc).toContain('### legacy-chart (peer-conflict)');
+    expect(doc).toContain('1. Option 1 (Swap package): Replace legacy-chart');
+    expect(doc).toContain('2. Option 2 (Explicit override): Add "@angular/core": "^16.2.12" under "overrides" in package.json');
+  });
+
   it('preserves ticked decisions and reviewer notes across plan regeneration', async () => {
     // 1. Initial generation
     const res = await writePlanDocuments(dir, samplePlan);

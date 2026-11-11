@@ -1,0 +1,26 @@
+{
+  "name": "angular-15-signup-boilerplate",
+  "repository": "https://github.com/cornflourblue/angular-15-signup-verification-boilerplate",
+  "commit": "0ba71391309cfad3940167842f3ca351bfd5b2fd",
+  "license": "MIT",
+  "tier": "ci",
+  "ci": true,
+  "nightly": true,
+  "startingAngular": "15.2.6",
+  "targetAngular": 17,
+  "steps": [
+    {
+      "step": 1,
+      "from": 15,
+      "to": 16,
+      "expectedBlockers": []
+    },
+    {
+      "step": 2,
+      "from": 16,
+      "to": 17,
+      "provisional": true,
+      "expectedBlockers": []
+    }
+  ]
+}

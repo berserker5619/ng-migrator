@@ -91,6 +91,7 @@ export interface Blocker {
   confidence?: 'high' | 'medium' | 'low';
   effort?: string;
   runnerUp?: string;
+  options?: string[];
   usage?: {
     filesCount: number;
     templateUsages: number;
@@ -111,6 +112,9 @@ export interface ResolutionCheck {
   status: 'confirmed' | 'conflict' | 'skipped' | 'failed';
   detail?: string;
   conflicts?: PeerConflict[];
+  tempDir?: string;
+  copiedFiles?: string[];
+  tempDirCleaned?: boolean;
 }
 
 export interface PlannedStep {

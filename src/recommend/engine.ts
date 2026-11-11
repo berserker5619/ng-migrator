@@ -56,6 +56,20 @@ export async function computeRecommendation(
     // fallback if file reading fails
   }
 
+  const extraUsageParts: string[] = [];
+  if (usage) {
+    if (usage.styleImports.length > 0) {
+      extraUsageParts.push(`style imports: [${usage.styleImports.join(', ')}]`);
+    }
+    if (usage.configReferences.length > 0) {
+      extraUsageParts.push(`configs: [${usage.configReferences.join(', ')}]`);
+    }
+    if (usage.peerRequiredBy.length > 0) {
+      extraUsageParts.push(`peer dependency of: [${usage.peerRequiredBy.join(', ')}]`);
+    }
+  }
+  const extraUsageSuffix = extraUsageParts.length > 0 ? `, ${extraUsageParts.join(', ')}` : '';
+
   const usageData = usage
     ? {
         filesCount: usage.files.length,
@@ -63,19 +77,22 @@ export async function computeRecommendation(
         importedSymbols: usage.importedSymbols,
         summary:
           blocker.package === '@angular/flex-layout'
-            ? `${usage.files.length} file(s), ${usage.templateOccurrences} template usage(s) of fx* directives, imports: [${usage.importedSymbols.join(', ')}]`
-            : `${usage.files.length} file(s), ${usage.templateOccurrences} template usage(s), imports: [${usage.importedSymbols.join(', ')}]`,
+            ? `${usage.files.length} file(s), ${usage.templateOccurrences} template usage(s) of fx* directives, imports: [${usage.importedSymbols.join(', ')}]${extraUsageSuffix}`
+            : `${usage.files.length} file(s), ${usage.templateOccurrences} template usage(s), imports: [${usage.importedSymbols.join(', ')}]${extraUsageSuffix}`,
       }
     : undefined;
 
-  // 0. Zero usage in project source files -> recommend removing the unused dependency
+  // 0. Zero usage across workspace -> recommend removing (or verifying if checks were incomplete)
   const isUnused =
     usage !== undefined &&
     usage.scannedSourceFilesCount > 0 &&
     usage.files.length === 0 &&
     usage.templateOccurrences === 0 &&
     usage.importedSymbols.length === 0 &&
-    usage.callSiteCount === 0;
+    usage.callSiteCount === 0 &&
+    usage.styleImports.length === 0 &&
+    usage.configReferences.length === 0 &&
+    usage.peerRequiredBy.length === 0;
 
   if (isUnused && usage) {
     let demotedRunnerUp = 'alternate package';
@@ -90,14 +107,17 @@ export async function computeRecommendation(
       demotedRunnerUp = 'Write replacement in project codebase';
     }
 
+    const verified = usage.allUnusedChecksVerified;
     return {
       recommendation: 'remove',
-      recommendedFix: 'remove the unused dependency',
+      recommendedFix: verified ? 'remove the unused dependency' : 'appears unused, verify',
       source: 'analysis',
-      confidence: 'high',
+      confidence: verified ? 'high' : 'medium',
       effort: '5 minutes (remove from package.json)',
       runnerUp: demotedRunnerUp,
-      reasoning: `No imports or template usages of ${blocker.package} were found across ${usage.scannedSourceFilesCount} source file(s).${rule?.notes ? ` ${rule.notes}` : ''}`,
+      reasoning: verified
+        ? `No imports, template usages, style imports, config references, or peer-dependency requirements for ${blocker.package} were found across ${usage.scannedSourceFilesCount} source file(s).${rule?.notes ? ` ${rule.notes}` : ''}`
+        : `No direct references to ${blocker.package} were found in ${usage.scannedSourceFilesCount} source file(s), but some workspace/peer checks could not be completed; verify before removing.${rule?.notes ? ` ${rule.notes}` : ''}`,
       usage: usageData,
     };
   }
@@ -233,12 +253,27 @@ export async function computeRecommendation(
     };
   }
 
+  // If this is a soft blocker (a published version declares compatibility with targetMajor, but is deprecated/unmaintained)
+  if (!blocker.hard) {
+    return {
+      recommendation: 'upgrade',
+      source: 'analysis',
+      confidence: 'medium',
+      effort: '15 to 30 minutes (verify in build and tests)',
+      runnerUp: 'replace with maintained alternative or in-project utility',
+      recommendedFix: 'Upgrade to declared-compatible release and monitor maintenance risk',
+      reasoning: `A release of ${blocker.package} declares peer compatibility with Angular ${targetMajor}, though the package is flagged as ${blocker.reason}. Verify behavior during build and tests.`,
+      usage: usageData,
+    };
+  }
+
   // Ladder 5: Manual fallback
   return {
     recommendation: 'manual',
     source: 'analysis',
     confidence: 'low',
     effort: 'several days',
+    runnerUp: 'fork or inline replacement',
     recommendedFix: 'Manual refactoring',
     reasoning: `No compatible version or known alternate found for ${blocker.package}. Manual audit and replacement required.`,
     usage: usageData,

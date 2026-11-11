@@ -1,0 +1,20 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    dependencies:
+      '@angular/common':
+        specifier: ^16.0.0
+        version: 16.2.12(rxjs@7.8.1)(zone.js@0.13.3)
+      '@angular/core':
+        specifier: ^16.0.0
+        version: 16.2.12(rxjs@7.8.1)(zone.js@0.13.3)
+      ngx-spinner:
+        specifier: ^16.0.0
+        version: 16.0.2(@angular/common@16.2.12)(@angular/core@16.2.12)
+

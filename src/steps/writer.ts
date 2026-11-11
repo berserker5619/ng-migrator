@@ -128,6 +128,12 @@ export function formatStepDocument(
       if (b.runnerUp) {
         lines.push(`- Runner-up: ${b.runnerUp}`);
       }
+      if (b.options && b.options.length > 0) {
+        lines.push('- Options:');
+        b.options.forEach((opt, idx) => {
+          lines.push(`  ${idx + 1}. ${opt}`);
+        });
+      }
       if (b.usage) {
         lines.push(`- Usage footprint: ${b.usage.summary}`);
       }
