@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.1.1] - 2026-11-11
+
+- Fixed semver range parsing crash (`TypeError: Invalid comparator`) on packages with malformed peer dependencies (e.g. single pipe `|` instead of `||` as in `@swimlane/ngx-charts`).
+- Added `normalizeRange` and `safeMinVersion` helpers with safe error handling to protect analysis and planning against invalid registry peer strings.
+- Added comprehensive unit test coverage for malformed range handling.
+
 ## [1.1.0] - 2026-11-11
 
 - Added global `--project <path>` option to `doctor`, `analyze`, `plan`, `status`, and `approve`.
