@@ -13,6 +13,9 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
     steps:
       - uses: actions/checkout@v7
         with:
@@ -21,6 +24,9 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
+
+      - name: Upgrade npm to latest
+        run: npm install -g npm@latest
 
       - name: Install dependencies
         run: npm ci
@@ -36,6 +42,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
+      - name: Check OIDC environment
+        run: |
+          if [ -n "$ACTIONS_ID_TOKEN_REQUEST_URL" ]; then
+            echo "GitHub Actions OIDC token provider is available."
+          else
+            echo "WARNING: ACTIONS_ID_TOKEN_REQUEST_URL is empty!"
+          fi
+
       - name: Publish package to npm
         run: |
           if [ -n "${{ secrets.NPM_TOKEN }}" ]; then
@@ -44,5 +58,5 @@ jobs:
             npm publish --access public
           else
             echo "Publishing via OIDC Trusted Publishing with provenance..."
-            npx npm@latest publish --provenance --access public
+            npm publish --provenance --access public
           fi
