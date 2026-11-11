@@ -35,6 +35,7 @@ export interface CliIo {
   env: NodeJS.ProcessEnv;
   nodeVersion: string;
   cwd: string;
+  clock?: () => Date;
 }
 
 interface GlobalOptions {
@@ -42,6 +43,16 @@ interface GlobalOptions {
   ascii?: boolean;
   verbose?: boolean;
   project?: string;
+  asOf?: string;
+}
+
+export function parseAsOfDate(value: string): Date {
+  const trimmed = value.trim();
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new NgmError('NGM-2001', `--as-of must be a valid ISO date (for example 2026-11-01), not "${value}".`);
+  }
+  return parsed;
 }
 
 export function parseTargetMajor(value: string): number {
@@ -55,13 +66,19 @@ export function parseTargetMajor(value: string): number {
   return major;
 }
 
-export function createProgram(io: CliIo, getOutput: () => Output, getProjectRoot: () => string = () => io.cwd): Command {
+export function createProgram(
+  io: CliIo,
+  getOutput: () => Output,
+  getProjectRoot: () => string = () => io.cwd,
+  getClock: () => () => Date = () => io.clock ?? (() => new Date()),
+): Command {
   const program = new Command();
   program
     .name(TOOL_NAME)
     .description('Plan Angular upgrades one major version at a time (n-1 to n). Never commits.')
     .version(TOOL_VERSION, '-v, --version')
     .option('--project <path>', 'path to the Angular project root (default: current directory)')
+    .option('--as-of <date>', 'reference ISO date for unmaintained threshold and timestamps (for example 2026-11-01)')
     .option('--no-color', 'plain output without colors')
     .option('--ascii', 'ASCII symbols only')
     .option('--verbose', 'print detailed output')
@@ -155,6 +172,7 @@ export function createProgram(io: CliIo, getOutput: () => Output, getProjectRoot
 
       const requirements = await getStepRequirements(nextMajor, registry);
       const rules = await loadRules(config.rules, projectRoot);
+      const clock = getClock();
       const resolution = await resolveStepDependencies({
         project,
         requirements,
@@ -165,6 +183,7 @@ export function createProgram(io: CliIo, getOutput: () => Output, getProjectRoot
         alternatesAllow: config.alternates.allow,
         alternatesDeny: config.alternates.deny,
         unmaintainedThresholdMonths: config.unmaintainedThresholdMonths,
+        clock,
       });
 
       out.info(`Dependencies analyzed: ${project.dependencies.length}`);
@@ -249,6 +268,7 @@ export function createProgram(io: CliIo, getOutput: () => Output, getProjectRoot
           onWarning: (msg) => out.warn(msg),
         });
 
+        const clock = getClock();
         out.info(`Planning upgrade: Angular ${project.angular.version} -> ${targetMajor}...`);
         const plan = await createPlan({
           project,
@@ -256,6 +276,7 @@ export function createProgram(io: CliIo, getOutput: () => Output, getProjectRoot
           registry,
           config,
           verifyResolution: !opts.offline,
+          clock,
         });
 
         const step1Res = plan.steps[0]?.resolution;
@@ -265,7 +286,7 @@ export function createProgram(io: CliIo, getOutput: () => Output, getProjectRoot
           );
         }
 
-        await writePlanDocuments(projectRoot, plan, project.hasNodeModules);
+        await writePlanDocuments(projectRoot, plan, project.hasNodeModules, clock);
 
         out.success(`\nPlan generated successfully (${plan.steps.length} step(s)):`);
         for (const s of plan.steps) {
@@ -347,7 +368,7 @@ export function createProgram(io: CliIo, getOutput: () => Output, getProjectRoot
         }
 
         step.status = 'approved';
-        step.approvedAt = new Date().toISOString();
+        step.approvedAt = getClock()().toISOString();
 
         await writeState(projectRoot, state);
 
@@ -374,14 +395,20 @@ export function createProgram(io: CliIo, getOutput: () => Output, getProjectRoot
 export async function runCli(argv: readonly string[], io: CliIo): Promise<number> {
   let output = new Output(io.stdout, io.stderr, { color: shouldUseColor(undefined, io.isTTY, io.env), ascii: false, verbose: false });
   let projectRoot = io.cwd;
+  let clock: () => Date = io.clock ?? (() => new Date());
   const getOutput = () => output;
   const getProjectRoot = () => projectRoot;
+  const getClock = () => clock;
 
-  const program = createProgram(io, getOutput, getProjectRoot);
+  const program = createProgram(io, getOutput, getProjectRoot, getClock);
   program.hook('preAction', (thisCommand) => {
     const g = thisCommand.optsWithGlobals<GlobalOptions>();
     if (g.project) {
       projectRoot = path.resolve(io.cwd, g.project);
+    }
+    if (g.asOf) {
+      const fixedDate = parseAsOfDate(g.asOf);
+      clock = () => fixedDate;
     }
     output = new Output(io.stdout, io.stderr, {
       color: shouldUseColor(g.color, io.isTTY, io.env),

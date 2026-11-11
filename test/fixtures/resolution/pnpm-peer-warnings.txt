@@ -1,0 +1,10 @@
+Lockfile is up to date, resolution step is skipped
+ WARN  Issues with peer dependencies found
+.
+├─┬ @ng-bootstrap/ng-bootstrap 14.2.0
+│ ├── ✕ unmet peer @angular/common@"^15.0.0": found 16.2.12
+│ └── ✕ unmet peer @angular/core@"^15.0.0": found 16.2.12
+└─┬ ngx-old-chart 2.1.0
+  └── ✕ unmet peer @angular/core@"^15.0.0": found 16.2.12
+
+ ERR_PNPM_PEER_DEP_ISSUES  Unmet peer dependencies

@@ -22,6 +22,7 @@ function makeIo(cwd: string) {
     env: {},
     nodeVersion: '24.0.0',
     cwd,
+    clock: () => new Date('2026-11-01T00:00:00.000Z'),
   };
   return { io, out: () => out.join(''), err: () => err.join('') };
 }

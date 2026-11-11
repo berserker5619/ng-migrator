@@ -163,14 +163,18 @@ export async function computeRecommendation(
 
       const bestAlt = sortedAlts.find((a) => a.supportsTargetAngular && a.isAllowed);
       const runnerUpAlt = sortedAlts.filter((a) => a.supportsTargetAngular && a.isAllowed && a !== bestAlt)[0];
+      const isTooling = rule.category === 'tooling' || blocker.dependencyKind === 'dev-only';
+      const chosenName = bestAlt ? bestAlt.name : 'CSS flexbox/grid';
 
       return {
         recommendation: 'alternate',
         source: 'rule',
         confidence: 'high',
         effort: '1 to 2 days',
-        runnerUp: runnerUpAlt ? runnerUpAlt.name : 'fork',
-        recommendedFix: bestAlt ? bestAlt.name : 'CSS flexbox/grid',
+        runnerUp: runnerUpAlt ? runnerUpAlt.name : isTooling ? 'remove deprecated dev tooling' : 'fork',
+        recommendedFix: isTooling && !chosenName.toLowerCase().startsWith('tooling migration')
+          ? `Tooling migration: ${chosenName}`
+          : chosenName,
         reasoning: rule.notes ?? 'Rule recommends an alternate package or modern styling replacement.',
         usage: usageData,
       };

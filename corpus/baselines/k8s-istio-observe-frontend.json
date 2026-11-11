@@ -8,6 +8,7 @@
   "nightly": true,
   "startingAngular": "12.0.1",
   "targetAngular": 16,
+  "asOf": "2026-11-01",
   "steps": [
     {
       "step": 1,
@@ -16,11 +17,12 @@
       "expectedBlockers": [
         {
           "package": "codelyzer",
+          "dependencyKind": "dev-only",
           "reason": "no-compatible-version",
           "hard": true,
           "expectedRecommendation": {
             "recommendation": "alternate",
-            "recommendedFix": "@angular-eslint/eslint-plugin",
+            "recommendedFix": "Tooling migration: TSLint to ESLint via @angular-eslint",
             "source": "rule",
             "confidence": "high",
             "runnerUp": "eslint",
@@ -33,6 +35,7 @@
         },
         {
           "package": "ngx-logger",
+          "dependencyKind": "runtime",
           "reason": "unmaintained",
           "hard": false,
           "evidence": "declared",
@@ -114,3 +117,4 @@
     }
   ]
 }
+

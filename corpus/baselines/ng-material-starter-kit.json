@@ -8,6 +8,7 @@
   "nightly": false,
   "startingAngular": "14.2.2",
   "targetAngular": 16,
+  "asOf": "2026-11-01",
   "steps": [
     {
       "step": 1,
@@ -16,6 +17,7 @@
       "expectedBlockers": [
         {
           "package": "@angular/flex-layout",
+          "dependencyKind": "runtime",
           "reason": "deprecated",
           "hard": false,
           "evidence": "declared compatible",
@@ -34,6 +36,7 @@
       "expectedBlockers": [
         {
           "package": "@angular/flex-layout",
+          "dependencyKind": "runtime",
           "reason": "deprecated",
           "hard": false,
           "evidence": "declared compatible",

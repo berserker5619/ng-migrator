@@ -13,6 +13,8 @@ let cleanup: () => Promise<void>;
 beforeEach(async () => ({ dir, cleanup } = await tempProject()));
 afterEach(async () => cleanup());
 
+const FIXED_CLOCK = () => new Date('2026-11-01T00:00:00.000Z');
+
 describe('synthetic corpus fixtures', () => {
   function makeMockRegistry(customPacks: Record<string, Packument> = {}): RegistryClient {
     const packs: Record<string, Packument> = {
@@ -98,6 +100,7 @@ describe('synthetic corpus fixtures', () => {
       registry: mockRegistry,
       config,
       verifyResolution: false,
+      clock: FIXED_CLOCK,
     });
 
     expect(plan.steps).toHaveLength(2);
@@ -167,6 +170,7 @@ describe('synthetic corpus fixtures', () => {
       registry: mockRegistry,
       config,
       verifyResolution: false,
+      clock: FIXED_CLOCK,
     });
 
     expect(plan.steps).toHaveLength(1);
@@ -213,6 +217,7 @@ describe('synthetic corpus fixtures', () => {
       registry: mockRegistry,
       config,
       verifyResolution: false,
+      clock: FIXED_CLOCK,
     });
 
     const step1 = plan.steps[0]!;
@@ -256,6 +261,7 @@ describe('synthetic corpus fixtures', () => {
       registry: mockRegistry,
       config,
       verifyResolution: false,
+      clock: FIXED_CLOCK,
     });
 
     const step1 = plan.steps[0]!;
@@ -303,6 +309,7 @@ describe('synthetic corpus fixtures', () => {
       registry: mockRegistry,
       config,
       verifyResolution: false,
+      clock: FIXED_CLOCK,
     });
 
     const step1 = plan.steps[0]!;
@@ -355,6 +362,7 @@ describe('synthetic corpus fixtures', () => {
       registry: mockRegistry,
       config,
       verifyResolution: false,
+      clock: FIXED_CLOCK,
     });
 
     const step1 = plan.steps[0]!;
@@ -379,6 +387,8 @@ describe('synthetic corpus fixtures', () => {
     );
 
     for (const b of baselines) {
+      expect(typeof b.asOf).toBe('string');
+      expect(String(b.asOf)).toMatch(/^\d{4}-\d{2}-\d{2}$/);
       if (b.license === 'unknown') {
         expect(b.tier).toBe('local-only');
         expect(b.ci).toBe(false);

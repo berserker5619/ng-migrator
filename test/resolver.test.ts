@@ -1,4 +1,4 @@
-import { writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { resolveConfig } from '../src/config/config.js';
@@ -10,7 +10,7 @@ import { RegistryClient, type Packument } from '../src/registry/client.js';
 import { loadNpmrc } from '../src/registry/npmrc.js';
 import { preserveRangeStyle, satisfiesAngularPeer } from '../src/resolver/range.js';
 import { resolveStepDependencies } from '../src/resolver/resolve.js';
-import { parseNpmEresolve, verifyWithPackageManager } from '../src/resolver/verify.js';
+import { parseNpmEresolve, parsePeerConflicts, verifyWithPackageManager } from '../src/resolver/verify.js';
 import { tempProject, writeCacheEntry } from './helpers.js';
 
 describe('preserveRangeStyle', () => {
@@ -71,6 +71,56 @@ npm error peer @angular/core@"^15.0.0" from @angular/material@15.2.0
         peer: '@angular/core',
         range: '^15.0.0',
         requiredBy: '@ng-bootstrap/ng-bootstrap@14.2.0',
+      },
+    ]);
+  });
+
+  it('parses recorded pnpm and yarn peer warning fixtures (confirming parser is not npm-only)', async () => {
+    const pnpmFixture = await readFile(
+      path.resolve(__dirname, 'fixtures', 'resolution', 'pnpm-peer-warnings.txt'),
+      'utf8',
+    );
+    const yarnFixture = await readFile(
+      path.resolve(__dirname, 'fixtures', 'resolution', 'yarn-peer-warnings.txt'),
+      'utf8',
+    );
+
+    expect(parsePeerConflicts(pnpmFixture)).toEqual([
+      {
+        peer: '@angular/common',
+        range: '^15.0.0',
+        requiredBy: '@ng-bootstrap/ng-bootstrap@14.2.0',
+        found: '@angular/common@16.2.12',
+      },
+      {
+        peer: '@angular/core',
+        range: '^15.0.0',
+        requiredBy: '@ng-bootstrap/ng-bootstrap@14.2.0',
+        found: '@angular/core@16.2.12',
+      },
+      {
+        peer: '@angular/core',
+        range: '^15.0.0',
+        requiredBy: 'ngx-old-chart@2.1.0',
+        found: '@angular/core@16.2.12',
+      },
+    ]);
+
+    expect(parsePeerConflicts(yarnFixture)).toEqual([
+      {
+        peer: '@angular/core',
+        range: '^15.0.0',
+        requiredBy: '@ng-bootstrap/ng-bootstrap@14.2.0',
+      },
+      {
+        peer: '@angular/common',
+        range: '^15.0.0',
+        requiredBy: '@ng-bootstrap/ng-bootstrap@14.2.0',
+      },
+      {
+        peer: '@angular/core',
+        range: '^12.0.0',
+        requiredBy: 'ngx-chips@2.2.2',
       },
     ]);
   });
@@ -222,6 +272,7 @@ npm error peer @angular/core@"^15.0.0" from conflicting-pkg@2.0.0
           registry,
           config,
           verifyResolution: true,
+          clock: () => new Date('2026-11-01T00:00:00.000Z'),
         });
 
         const step = plan.steps[0]!;
@@ -232,6 +283,122 @@ npm error peer @angular/core@"^15.0.0" from conflicting-pkg@2.0.0
         expect(peerBlocker?.options).toHaveLength(2);
         expect(peerBlocker?.options?.[0]).toContain('Swap conflicting-pkg');
         expect(peerBlocker?.options?.[1]).toContain(expectedOverrideKey);
+
+        spy.mockRestore();
+      } finally {
+        await cleanup();
+      }
+    }
+  });
+
+  it('runs pnpm and yarn in strictest mode and converts peer warnings (even on exit code 0) into the same blocker shape as npm ERESOLVE', async () => {
+    const pnpmFixture = await readFile(
+      path.resolve(__dirname, 'fixtures', 'resolution', 'pnpm-peer-warnings.txt'),
+      'utf8',
+    );
+    const yarnFixture = await readFile(
+      path.resolve(__dirname, 'fixtures', 'resolution', 'yarn-peer-warnings.txt'),
+      'utf8',
+    );
+
+    for (const [pm, lockfile, fixtureText, expectedArg, expectedOverrideKey] of [
+      ['pnpm', 'pnpm-lock.yaml', pnpmFixture, '--strict-peer-dependencies', '"pnpm.overrides"'],
+      ['yarn', 'yarn.lock', yarnFixture, '--non-interactive', '"resolutions"'],
+    ] as const) {
+      const { dir, cleanup } = await tempProject();
+      try {
+        await writeFile(
+          path.join(dir, 'package.json'),
+          JSON.stringify({
+            name: `${pm}-warning-app`,
+            dependencies: {
+              '@angular/core': '^15.2.0',
+              '@ng-bootstrap/ng-bootstrap': '^14.2.0',
+            },
+          }),
+        );
+        await writeFile(path.join(dir, lockfile), '');
+
+        await writeCacheEntry(dir, '@angular/core', {
+          name: '@angular/core',
+          distTags: { latest: '16.2.12' },
+          versions: {
+            '15.2.0': { version: '15.2.0' },
+            '16.2.12': { version: '16.2.12' },
+          },
+        });
+        await writeCacheEntry(dir, '@angular/compiler-cli', {
+          name: '@angular/compiler-cli',
+          distTags: { latest: '16.2.12' },
+          versions: {
+            '16.2.12': { version: '16.2.12', peerDependencies: { typescript: '>=4.9.3 <5.2.0' } },
+          },
+        });
+        await writeCacheEntry(dir, '@angular/cli', {
+          name: '@angular/cli',
+          distTags: { latest: '16.2.12' },
+          versions: {
+            '16.2.12': { version: '16.2.12' },
+          },
+        });
+        await writeCacheEntry(dir, '@ng-bootstrap/ng-bootstrap', {
+          name: '@ng-bootstrap/ng-bootstrap',
+          distTags: { latest: '14.2.0' },
+          versions: {
+            '14.2.0': {
+              version: '14.2.0',
+              peerDependencies: { '@angular/core': '>=14.0.0' },
+            },
+          },
+        });
+
+        let spawnedArgs: readonly string[] = [];
+        // Simulate yarn/pnpm exiting 0 while emitting peer warnings
+        const spy = vi.spyOn(proc, 'run').mockImplementation(async (_cmd, args) => {
+          spawnedArgs = args;
+          return {
+            command: `${_cmd} ${args.join(' ')}`,
+            exitCode: 0,
+            stdout: fixtureText,
+            stderr: '',
+            timedOut: false,
+            failed: false,
+          };
+        });
+
+        const project = await readProject(dir);
+        const config = resolveConfig({}, {}, { packageManager: project.packageManager.name });
+        const npmrc = await loadNpmrc(dir, {});
+        const registry = new RegistryClient({
+          npmrc,
+          cacheDir: path.join(dir, '.ng-migrator', 'cache'),
+          offline: true,
+        });
+
+        const plan = await createPlan({
+          project,
+          targetMajor: 16,
+          registry,
+          config,
+          verifyResolution: true,
+          clock: () => new Date('2026-11-01T00:00:00.000Z'),
+        });
+
+        expect(spawnedArgs).toContain(expectedArg);
+        const step = plan.steps[0]!;
+        expect(step.resolution.status).toBe('conflict');
+        expect(step.resolution.packageManager).toBe(pm);
+        expect(step.resolution.withWarnings).toBe(true);
+
+        const ngbBlocker = step.blockers.find(
+          (b) => b.package === '@ng-bootstrap/ng-bootstrap' && b.reason === 'peer-conflict',
+        );
+        expect(ngbBlocker).toBeDefined();
+        expect(ngbBlocker?.hard).toBe(true);
+        expect(ngbBlocker?.dependencyKind).toBe('runtime');
+        expect(ngbBlocker?.options).toHaveLength(2);
+        expect(ngbBlocker?.options?.[0]).toContain('Swap @ng-bootstrap/ng-bootstrap');
+        expect(ngbBlocker?.options?.[1]).toContain(expectedOverrideKey);
 
         spy.mockRestore();
       } finally {
@@ -318,6 +485,7 @@ describe('resolveStepDependencies', () => {
       requirements,
       registry: mockRegistry,
       neverTouch: ['kept-internal'],
+      clock: () => new Date('2026-11-01T00:00:00.000Z'),
     });
 
     // 1. Angular core upgraded to 16.2.12

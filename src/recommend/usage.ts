@@ -18,6 +18,13 @@ export interface UsageFootprint {
   allUnusedChecksVerified: boolean;
 }
 
+const FX_DIRECTIVE_REGEX = /\b(fx[A-Z][a-zA-Z0-9]*(?:\.[a-zA-Z0-9-]+)?|fx-[a-z-]+)\b/g;
+
+export function countFlexLayoutTemplateDirectives(templateText: string): number {
+  const matches = templateText.match(FX_DIRECTIVE_REGEX);
+  return matches ? matches.length : 0;
+}
+
 function stringReferencesPackage(value: string, packageName: string): boolean {
   if (value === packageName) return true;
   if (value.startsWith(`${packageName}/`) || value.startsWith(`~${packageName}/`) || value === `~${packageName}`) {
@@ -88,12 +95,13 @@ export async function analyzePackageUsage(
     // Scan inline templates in TypeScript components (before checking code.includes(packageName),
     // because NgModule apps often import FlexLayoutModule in AppModule while using fx* in component inline templates)
     if (packageName === '@angular/flex-layout' && code.includes('template')) {
-      const inlineTemplateMatch = /template\s*:\s*(['"`])([\s\S]*?)\1/.exec(code);
-      if (inlineTemplateMatch && inlineTemplateMatch[2]) {
-        const inlineTpl = inlineTemplateMatch[2];
-        const fxMatches = inlineTpl.match(/\b(fx[A-Z][a-zA-Z0-9]*|fx[a-z-]+)\b/g);
-        if (fxMatches) {
-          templateOccurrences += fxMatches.length;
+      const inlineTplRegex = /template\s*:\s*(['"`])([\s\S]*?)\1/g;
+      let inlineMatch: RegExpExecArray | null;
+      while ((inlineMatch = inlineTplRegex.exec(code)) !== null) {
+        const inlineTpl = inlineMatch[2] ?? '';
+        const count = countFlexLayoutTemplateDirectives(inlineTpl);
+        if (count > 0) {
+          templateOccurrences += count;
           referencingFiles.add(relFile);
         }
       }
@@ -162,9 +170,9 @@ export async function analyzePackageUsage(
       const html = await readFile(fullPath, 'utf8');
 
       if (packageName === '@angular/flex-layout') {
-        const fxMatches = html.match(/\b(fx[A-Z][a-zA-Z0-9]*|fx[a-z-]+)\b/g);
-        if (fxMatches) {
-          templateOccurrences += fxMatches.length;
+        const count = countFlexLayoutTemplateDirectives(html);
+        if (count > 0) {
+          templateOccurrences += count;
           referencingFiles.add(relHtml);
         }
       } else {

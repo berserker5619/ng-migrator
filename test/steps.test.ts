@@ -156,9 +156,33 @@ describe('steps writer and decision tracking', () => {
     expect(doc).toContain('- "@angular/core": "^15.2.0"\n+ "@angular/core": "^16.2.12"');
     expect(doc).toContain('- "zone.js": "~0.12.0"\n+ "zone.js": "~0.13.3"');
     expect(doc).toContain('- "typescript": "4.9.5"\n+ "typescript": "5.1.6"');
+    expect(doc).toContain('Resolution check: confirmed by npm (without warnings).');
     expect(doc).toContain('### legacy-chart (peer-conflict)');
+    expect(doc).toContain('- Dependency kind: runtime');
     expect(doc).toContain('1. Option 1 (Swap package): Replace legacy-chart');
     expect(doc).toContain('2. Option 2 (Explicit override): Add "@angular/core": "^16.2.12" under "overrides" in package.json');
+  });
+
+  it('reports which package manager confirmed the set and whether it did so with warnings', () => {
+    const yarnWarnStep: PlannedStep = {
+      ...sampleStep,
+      resolution: {
+        status: 'confirmed',
+        packageManager: 'yarn',
+        withWarnings: true,
+      },
+    };
+    expect(formatStepDocument(yarnWarnStep)).toContain('Resolution check: confirmed by yarn (with warnings).');
+
+    const pnpmCleanStep: PlannedStep = {
+      ...sampleStep,
+      resolution: {
+        status: 'confirmed',
+        packageManager: 'pnpm',
+        withWarnings: false,
+      },
+    };
+    expect(formatStepDocument(pnpmCleanStep)).toContain('Resolution check: confirmed by pnpm (without warnings).');
   });
 
   it('preserves ticked decisions and reviewer notes across plan regeneration', async () => {

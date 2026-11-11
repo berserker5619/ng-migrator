@@ -95,10 +95,10 @@ export async function findAlternateCandidates(
     });
   }
 
-  // Sort candidates: allowed & supported first
+  // Sort candidates: allowed & supported first, preserving rule order on ties
   return results.sort((a, b) => {
     if (a.supportsTargetAngular === b.supportsTargetAngular) {
-      return a.name.localeCompare(b.name);
+      return 0;
     }
     return a.supportsTargetAngular ? -1 : 1;
   });

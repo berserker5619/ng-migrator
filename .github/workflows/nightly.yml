@@ -58,6 +58,6 @@ jobs:
           git -C /tmp/corpus/${{ matrix.entry.name }} checkout FETCH_HEAD
           cd /tmp/corpus/${{ matrix.entry.name }}
           node "$GITHUB_WORKSPACE/dist/cli.js" doctor
-          node "$GITHUB_WORKSPACE/dist/cli.js" analyze
-          node "$GITHUB_WORKSPACE/dist/cli.js" plan --to ${{ matrix.entry.targetAngular }}
+          node "$GITHUB_WORKSPACE/dist/cli.js" --as-of ${{ matrix.entry.asOf }} analyze
+          node "$GITHUB_WORKSPACE/dist/cli.js" --as-of ${{ matrix.entry.asOf }} plan --to ${{ matrix.entry.targetAngular }}
 

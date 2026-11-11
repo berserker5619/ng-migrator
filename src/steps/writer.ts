@@ -85,6 +85,18 @@ export function formatStepDocument(
     }
   }
   lines.push('');
+  const pmName = step.resolution.packageManager ?? 'npm';
+  const warningsLabel = step.resolution.withWarnings ? 'with warnings' : 'without warnings';
+  if (step.resolution.status === 'confirmed') {
+    lines.push(`Resolution check: confirmed by ${pmName} (${warningsLabel}).`);
+  } else if (step.resolution.status === 'conflict') {
+    lines.push(`Resolution check: ${pmName} reported peer dependency conflicts (${warningsLabel}).`);
+  } else if (step.resolution.status === 'skipped') {
+    lines.push(`Resolution check: skipped (${step.provisional ? 'provisional step' : 'offline mode'}, package manager: ${pmName}).`);
+  } else if (step.resolution.status === 'failed') {
+    lines.push(`Resolution check: ${pmName} check failed${step.resolution.detail ? ` (${step.resolution.detail})` : ''}.`);
+  }
+  lines.push('');
 
   if (step.heldBack.length > 0) {
     lines.push('## Held-back packages (need later Angular versions)');
@@ -103,6 +115,7 @@ export function formatStepDocument(
     for (const b of step.blockers) {
       const typeLabel = b.hard ? '' : ' [soft / unmaintained]';
       lines.push(`### ${b.package} (${b.reason})${typeLabel}`);
+      lines.push(`- Dependency kind: ${b.dependencyKind ?? 'runtime'}`);
       if (b.evidence) {
         const evLabel = b.evidence === 'verified' ? 'verified by build' : 'declared compatible';
         lines.push(`- Evidence: ${evLabel}`);
@@ -260,8 +273,8 @@ export async function extractDecisionsFromFile(filePath: string): Promise<{
       const id = match[3]!;
       decisions[id] = isChecked;
 
-      // Migration: If this was a legacy blocker-<pkg> ID, also map to the stable generated ID
-      if (id.startsWith('blocker-')) {
+      // Migration: If this was a legacy blocker-<pkg> ID (without 8-hex hash suffix), also map to the stable generated ID
+      if (id.startsWith('blocker-') && !/-[a-f0-9]{8}$/.test(id)) {
         const legacyPkg = id.slice('blocker-'.length);
         const stableId = generateDecisionId(legacyPkg, 'blocker');
         decisions[stableId] = isChecked;
@@ -287,6 +300,7 @@ export async function writePlanDocuments(
   root: string,
   plan: Plan,
   hasNodeModules: boolean = true,
+  clock?: (() => Date) | Date,
 ): Promise<WritePlanResult> {
   const baseDir = path.join(root, '.ng-migrator');
   const stepsDir = path.join(baseDir, 'steps');
@@ -294,7 +308,8 @@ export async function writePlanDocuments(
 
   // Read existing state or create new
   const existingState = await readState(root);
-  const state: MigratorState = existingState ?? createState();
+  const now = typeof clock === 'function' ? clock() : clock;
+  const state: MigratorState = existingState ?? createState(now);
   state.startVersion = plan.startVersion;
   state.targetMajor = plan.targetMajor;
 
@@ -331,6 +346,12 @@ export async function writePlanDocuments(
 
     const docContent = formatStepDocument(step, stepState, hasNodeModules);
     await writeGeneratedText(fullPath, docContent);
+    for (const b of step.blockers) {
+      const id = generateDecisionId(b.package, 'blocker');
+      if (stepState.decisions[id] === undefined) {
+        stepState.decisions[id] = false;
+      }
+    }
     stepFiles.push(fullPath);
   }
 
@@ -339,7 +360,7 @@ export async function writePlanDocuments(
   const summaryFile = path.join(baseDir, 'summary.md');
   await writeGeneratedText(summaryFile, summaryContent);
 
-  await writeState(root, state);
+  await writeState(root, state, now);
 
   return {
     stateFile: statePath(root),

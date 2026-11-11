@@ -27,6 +27,7 @@ export interface ResolveStepOptions {
   alternatesDeny?: readonly string[];
   unmaintainedThresholdMonths?: number;
   now?: number;
+  clock?: () => Date;
 }
 
 export interface StepResolution {
@@ -74,8 +75,10 @@ export async function resolveStepDependencies(
     pinned = {},
     neverTouch = [],
     unmaintainedThresholdMonths = 18,
-    now = Date.now(),
+    now,
+    clock,
   } = options;
+  const effectiveNow = clock ? clock().getTime() : (now ?? Date.now());
   const changes: PackageChange[] = [];
   const unchanged: string[] = [];
   const heldBack: HeldBack[] = [];
@@ -151,7 +154,7 @@ export async function resolveStepDependencies(
       const targetVersion = versions.find((v) => semver.prerelease(v) === null) ?? versions[0]!;
       const meta = pack.versions[targetVersion];
       const isDeprecated = Boolean(meta?.deprecated);
-      const isUnmaint = isPackageUnmaintained(pack, targetVersion, rule, unmaintainedThresholdMonths, now, targetMajor);
+      const isUnmaint = isPackageUnmaintained(pack, targetVersion, rule, unmaintainedThresholdMonths, effectiveNow, targetMajor);
 
       changes.push({
         name: dep.name,
@@ -318,7 +321,7 @@ export async function resolveStepDependencies(
       const meta = pack.versions[targetVersion];
       const currentVersion = dep.installed ?? semver.minVersion(dep.declared)?.version;
       const isDeprecated = Boolean(meta?.deprecated);
-      const isUnmaint = isPackageUnmaintained(pack, targetVersion, rule, unmaintainedThresholdMonths, now, targetMajor);
+      const isUnmaint = isPackageUnmaintained(pack, targetVersion, rule, unmaintainedThresholdMonths, effectiveNow, targetMajor);
 
       if (currentVersion && semver.eq(currentVersion, targetVersion) && !isDeprecated && !isUnmaint) {
         unchanged.push(dep.name);
@@ -388,8 +391,12 @@ export async function resolveStepDependencies(
     }
   }
 
-  // Enrich blockers with recommendations
+  // Enrich blockers with dependencyKind and recommendations
   for (const b of blockers) {
+    if (!b.dependencyKind) {
+      const depInfo = project.dependencies.find((d) => d.name === b.package);
+      b.dependencyKind = depInfo?.type === 'devDependencies' ? 'dev-only' : 'runtime';
+    }
     const rec = await computeRecommendation({
       projectRoot: project.root,
       blocker: b,

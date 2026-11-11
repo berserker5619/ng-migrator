@@ -15,14 +15,11 @@ export interface VerifyResolutionOptions {
 }
 
 /**
- * Parses npm ERESOLVE (and pnpm / yarn) peer dependency error messages from output.
- * Example npm output:
- *   npm error While resolving: @angular/material@15.2.0
- *   npm error Found: @angular/core@16.2.0
- *   npm error Could not resolve dependency:
- *   npm error peer @angular/core@"^15.0.0" from @angular/material@15.2.0
+ * Parses peer dependency conflicts and warnings from npm (ERESOLVE), pnpm, and yarn (v1 and Berry) output.
+ * Not npm-only: supports npm ERESOLVE stanzas, pnpm unmet/missing peer trees, yarn v1 incorrect/unmet peer warnings,
+ * and yarn Berry YN0060 peer warnings.
  */
-export function parseNpmEresolve(output: string): PeerConflict[] {
+export function parsePeerConflicts(output: string): PeerConflict[] {
   const conflicts: PeerConflict[] = [];
   const lines = output.split(/\r?\n/);
   let lastFound: string | undefined;
@@ -36,7 +33,7 @@ export function parseNpmEresolve(output: string): PeerConflict[] {
       lastWhileResolving = whileMatch[1]!;
     }
 
-    const foundMatch = /Found:\s+([@\w/.-]+@[\d\w.-]+)/i.exec(line);
+    const foundMatch = /(?:Found|Conflicting peer dependency):\s+([@\w/.-]+@[\d\w.-]+)/i.exec(line);
     if (foundMatch) {
       lastFound = foundMatch[1]!;
     }
@@ -53,7 +50,7 @@ export function parseNpmEresolve(output: string): PeerConflict[] {
       continue;
     }
 
-    // Match pnpm: '✕ unmet peer @angular/core@"^15.0.0": found 16.2.12' (under package header)
+    // Match pnpm: '✕ unmet peer @angular/core@"^15.0.0": found 16.2.12' or '✕ missing peer @angular/core@"^15.0.0"' (under package header)
     const pnpmParentMatch = /^[\s└├│─┬]+([@\w/.-]+)\s+([\d]+\.[\d]+\.[\d]+[\w.-]*)\s*$/i.exec(line);
     if (pnpmParentMatch) {
       lastWhileResolving = `${pnpmParentMatch[1]}@${pnpmParentMatch[2]}`;
@@ -68,8 +65,17 @@ export function parseNpmEresolve(output: string): PeerConflict[] {
       });
       continue;
     }
+    const pnpmMissingMatch = /missing peer\s+([@\w/.-]+)@["']?([^"':\s]+)["']?/i.exec(line);
+    if (pnpmMissingMatch && lastWhileResolving) {
+      conflicts.push({
+        peer: pnpmMissingMatch[1]!,
+        range: pnpmMissingMatch[2]!.trim(),
+        requiredBy: lastWhileResolving,
+      });
+      continue;
+    }
 
-    // Match yarn: 'ngx-foo@3.1.0 requires a peer of @angular/core@^15.0.0' or 'warning " > pkg@1.0.0" has incorrect peer dependency "@angular/core@^15.0.0"'
+    // Match yarn v1: 'ngx-foo@3.1.0 requires a peer of @angular/core@^15.0.0'
     const yarnPeerMatch = /([@\w/.-]+@[\d\w.-]+)\s+requires a peer of\s+([@\w/.-]+)@["']?([^\s"']+)["']?/i.exec(line);
     if (yarnPeerMatch) {
       conflicts.push({
@@ -79,18 +85,33 @@ export function parseNpmEresolve(output: string): PeerConflict[] {
       });
       continue;
     }
-    const yarnIncorrectMatch = /([@\w/.-]+@[\d\w.-]+)["']?\s+has incorrect peer dependency\s+["']([@\w/.-]+)@([^"']+)["']/i.exec(line);
-    if (yarnIncorrectMatch) {
+    // Match yarn v1: 'warning " > pkg@1.0.0" has incorrect/unmet peer dependency "@angular/core@^15.0.0"'
+    const yarnWarnMatch = /([@\w/.-]+@[\d\w.-]+)["']?\s+has (?:incorrect|unmet) peer dependency\s+["']([@\w/.-]+)@([^"']+)["']/i.exec(line);
+    if (yarnWarnMatch) {
       conflicts.push({
-        peer: yarnIncorrectMatch[2]!,
-        range: yarnIncorrectMatch[3]!,
-        requiredBy: yarnIncorrectMatch[1]!,
+        peer: yarnWarnMatch[2]!,
+        range: yarnWarnMatch[3]!,
+        requiredBy: yarnWarnMatch[1]!,
+      });
+      continue;
+    }
+    // Match yarn Berry (YN0060): 'provides @angular/core (p123) with version 16.2.12, which doesn't satisfy what @angular/material (and others) request (^15.0.0).'
+    const yarnBerryMatch = /provides\s+([@\w/.-]+)\s+(?:\([^)]+\)\s+)?with version\s+([\d\w.-]+),\s+which doesn't satisfy what\s+([@\w/.-]+)(?:\s+\(and others\))?\s+requests?\s+\(([^)]+)\)/i.exec(line);
+    if (yarnBerryMatch) {
+      conflicts.push({
+        peer: yarnBerryMatch[1]!,
+        found: `${yarnBerryMatch[1]}@${yarnBerryMatch[2]}`,
+        requiredBy: yarnBerryMatch[3]!,
+        range: yarnBerryMatch[4]!.trim(),
       });
     }
   }
 
   return conflicts;
 }
+
+/** Alias maintained for existing callers; delegates to multi-PM parsePeerConflicts. */
+export const parseNpmEresolve = parsePeerConflicts;
 
 /**
  * Verifies proposed dependency versions by running a lockfile-only dry run
@@ -195,16 +216,29 @@ export async function verifyWithPackageManager(
 
     onTempDirReady?.({ tempDir, copiedFiles: [...copiedFiles] });
 
-    // Run lockfile-only check
+    // Run lockfile-only check in the strictest peer mode available for each package manager
     let cmd = 'npm';
-    let args: string[] = ['install', '--package-lock-only', '--no-audit', '--no-fund', '--ignore-scripts'];
+    let args: string[] = [
+      'install',
+      '--package-lock-only',
+      '--strict-peer-deps',
+      '--no-audit',
+      '--no-fund',
+      '--ignore-scripts',
+    ];
 
     if (packageManager === 'pnpm') {
       cmd = 'pnpm';
-      args = ['install', '--lockfile-only', '--ignore-scripts'];
+      args = [
+        'install',
+        '--lockfile-only',
+        '--ignore-scripts',
+        '--strict-peer-dependencies',
+        '--config.strict-peer-dependencies=true',
+      ];
     } else if (packageManager === 'yarn') {
       cmd = 'yarn';
-      args = ['install', '--mode', 'update-lockfile', '--ignore-scripts'];
+      args = ['install', '--mode', 'update-lockfile', '--ignore-scripts', '--non-interactive'];
     }
 
     const result = await run(cmd, args, { cwd: tempDir, cancelSignal: abortController.signal });
@@ -217,28 +251,49 @@ export async function verifyWithPackageManager(
       process.exit(interruptedExitCode);
     }
 
-    if (result.exitCode === 0) {
+    const fullOutput = `${result.stdout}\n${result.stderr}`;
+    const conflicts = parsePeerConflicts(fullOutput);
+    const hasWarningLines = /(?:^|\n)\s*(?:npm warn|warn\b|warning\b|➤ YN\d+:)/i.test(fullOutput);
+
+    // Even if pnpm or yarn exits 0, peer warnings parsed from output are treated as peer-conflict blockers
+    if (conflicts.length > 0) {
       return {
-        status: 'confirmed',
+        status: 'conflict',
+        packageManager,
+        withWarnings: result.exitCode === 0 || hasWarningLines,
+        detail: 'Peer dependency conflict during resolution check.',
+        conflicts,
         tempDir,
         copiedFiles,
         tempDirCleaned,
       };
     }
 
-    const fullOutput = `${result.stdout}\n${result.stderr}`;
+    if (result.exitCode === 0) {
+      return {
+        status: 'confirmed',
+        packageManager,
+        withWarnings: hasWarningLines,
+        tempDir,
+        copiedFiles,
+        tempDirCleaned,
+      };
+    }
+
     if (
       fullOutput.includes('ERESOLVE') ||
       fullOutput.includes('Could not resolve dependency') ||
       fullOutput.includes('ERR_PNPM_PEER_DEP_ISSUES') ||
       fullOutput.includes('unmet peer') ||
-      fullOutput.includes('requires a peer of')
+      fullOutput.includes('requires a peer of') ||
+      fullOutput.includes('has incorrect peer dependency') ||
+      fullOutput.includes('has unmet peer dependency')
     ) {
-      const conflicts = parseNpmEresolve(fullOutput);
       return {
         status: 'conflict',
+        packageManager,
+        withWarnings: hasWarningLines,
         detail: 'Peer dependency conflict during resolution check.',
-        conflicts: conflicts.length > 0 ? conflicts : undefined,
         tempDir,
         copiedFiles,
         tempDirCleaned,
@@ -247,6 +302,8 @@ export async function verifyWithPackageManager(
 
     return {
       status: 'failed',
+      packageManager,
+      withWarnings: hasWarningLines,
       detail: result.stderr.trim() || result.stdout.trim() || `Package manager exited with code ${result.exitCode}`,
       tempDir,
       copiedFiles,

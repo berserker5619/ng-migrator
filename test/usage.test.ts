@@ -81,6 +81,50 @@ describe('usage analysis', () => {
     expect(footprint.templateOccurrences).toBe(3);
   });
 
+  it('detects template usage variants: [fxFlex], fxFlex.gt-sm, fxLayout="row wrap", inline templates, and *ngIf blocks', async () => {
+    await mkdir(path.join(dir, 'src', 'app'), { recursive: true });
+
+    // 1. External HTML template with [fxFlex], fxFlex.gt-sm, fxLayout="row wrap", and *ngIf block
+    await writeFile(
+      path.join(dir, 'src', 'app', 'dashboard.component.html'),
+      `
+      <section fxLayout="row wrap">
+        <div *ngIf="isVisible" [fxFlex]="colWidth" fxFlex.gt-sm="33%">
+          <span *ngIf="showBadge" [fxFlex.lt-md]="100">Card</span>
+        </div>
+      </section>
+      `,
+    );
+
+    // 2. Inline component template using [fxFlex], fxFlex.gt-sm, fxLayout="row wrap" inside *ngIf
+    await writeFile(
+      path.join(dir, 'src', 'app', 'inline-card.component.ts'),
+      `
+      import { Component } from '@angular/core';
+      @Component({
+        selector: 'app-inline-card',
+        template: \`
+          <div *ngIf="ready" fxLayout="row wrap">
+            <div [fxFlex]="'50%'" fxFlex.gt-sm="25%">Item</div>
+          </div>
+        \`
+      })
+      export class InlineCardComponent {
+        ready = true;
+      }
+      `,
+    );
+
+    const footprint = await analyzePackageUsage(dir, '@angular/flex-layout');
+    expect(footprint.files).toEqual([
+      'src/app/dashboard.component.html',
+      'src/app/inline-card.component.ts',
+    ]);
+    // 4 occurrences in dashboard.component.html (fxLayout="row wrap", [fxFlex], fxFlex.gt-sm, [fxFlex.lt-md])
+    // + 3 occurrences in inline-card.component.ts (fxLayout="row wrap", [fxFlex], fxFlex.gt-sm) = 7
+    expect(footprint.templateOccurrences).toBe(7);
+  });
+
   describe('unused-dependency guard fixtures', () => {
     const mockRegistry = {
       packument: async () => undefined,

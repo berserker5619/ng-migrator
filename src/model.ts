@@ -78,6 +78,8 @@ export interface Blocker {
   reason: BlockerReason;
   /** Hard blockers stop the step until resolved. */
   hard: boolean;
+  /** Whether the package is a runtime dependency ('dependencies') or dev-only ('devDependencies'). */
+  dependencyKind?: 'runtime' | 'dev-only';
   details: string;
   current?: string;
   /** Newest release that supported the previous major, if known. */
@@ -110,6 +112,9 @@ export interface PeerConflict {
 
 export interface ResolutionCheck {
   status: 'confirmed' | 'conflict' | 'skipped' | 'failed';
+  packageManager?: PackageManager;
+  withWarnings?: boolean;
+  warnings?: string[];
   detail?: string;
   conflicts?: PeerConflict[];
   tempDir?: string;

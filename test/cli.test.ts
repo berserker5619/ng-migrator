@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { runCli, type CliIo } from '../src/cli/program.js';
@@ -16,6 +16,7 @@ function io(overrides: Partial<CliIo> = {}) {
     env: {},
     nodeVersion: '24.0.0',
     cwd: process.cwd(),
+    clock: () => new Date('2026-11-01T00:00:00.000Z'),
     ...overrides,
   };
   return { value, out: () => out.join(''), err: () => err.join('') };
@@ -59,10 +60,15 @@ describe('cli', () => {
     expect(await runCli(['approve', 'two'], t.value)).toBe(ExitCode.Usage);
   });
 
-  it('exits 6 on an unsupported Node version', async () => {
-    const t = io({ nodeVersion: '18.19.0' });
+  it('exits 6 on an unsupported Node version and allows Node 18, 20, and 22', async () => {
+    const t = io({ nodeVersion: '18.10.0' });
     expect(await runCli(['status'], t.value)).toBe(ExitCode.Environment);
     expect(t.err()).toContain('NGM-6001');
+
+    for (const v of ['18.20.4', '20.18.0', '22.12.0']) {
+      const ok = io({ nodeVersion: v });
+      expect(await runCli(['--version'], ok.value)).toBe(ExitCode.Success);
+    }
   });
 
   it('uses ASCII symbols and no color when asked', async () => {
@@ -224,6 +230,99 @@ describe('cli', () => {
       const hardOut = io({ cwd: dir });
       expect(await runCli(['analyze', '--fail-on-blockers', '--offline'], hardOut.value)).toBe(ExitCode.HardBlockers);
       expect(hardOut.err()).toContain('NGM-4001');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('supports --as-of <date> to compute unmaintained threshold against a fixed date and produce identical output on re-run', async () => {
+    const { dir, cleanup } = await tempProject();
+    try {
+      await mkdir(path.join(dir, 'src'), { recursive: true });
+      await writeFile(path.join(dir, 'src', 'main.ts'), "import 'date-sensitive-lib';");
+      await writeFile(
+        path.join(dir, 'package.json'),
+        JSON.stringify({
+          name: 'as-of-app',
+          dependencies: {
+            '@angular/core': '^15.2.0',
+            'date-sensitive-lib': '^1.0.0',
+          },
+        }),
+      );
+      await writeCacheEntry(dir, '@angular/core', {
+        name: '@angular/core',
+        distTags: { latest: '16.2.12' },
+        versions: {
+          '15.2.0': { version: '15.2.0' },
+          '16.2.12': { version: '16.2.12' },
+        },
+      });
+      await writeCacheEntry(dir, '@angular/compiler-cli', {
+        name: '@angular/compiler-cli',
+        distTags: { latest: '16.2.12' },
+        versions: {
+          '16.2.12': { version: '16.2.12', peerDependencies: { typescript: '>=4.9.3 <5.2.0' } },
+        },
+      });
+      await writeCacheEntry(dir, '@angular/cli', {
+        name: '@angular/cli',
+        distTags: { latest: '16.2.12' },
+        versions: {
+          '16.2.12': { version: '16.2.12' },
+        },
+      });
+      // Published on 2025-01-01:
+      // - As of 2025-06-01 (5 months later), it is NOT unmaintained (< 18 months).
+      // - As of 2026-11-01 (22 months later), it IS unmaintained (> 18 months).
+      await writeCacheEntry(dir, 'date-sensitive-lib', {
+        name: 'date-sensitive-lib',
+        distTags: { latest: '2.0.0' },
+        versions: {
+          '2.0.0': {
+            version: '2.0.0',
+            peerDependencies: { '@angular/core': '^16.0.0' },
+          },
+        },
+        time: { '2.0.0': '2025-01-01T00:00:00.000Z' },
+      });
+
+      // Invalid --as-of returns exit code 2 (NGM-2001)
+      const badAsOf = io({ cwd: dir });
+      expect(await runCli(['--as-of', 'not-a-date', 'analyze', '--offline'], badAsOf.value)).toBe(ExitCode.Usage);
+      expect(badAsOf.err()).toContain('NGM-2001');
+
+      // Early date: 2025-06-01 -> 0 blockers
+      const earlyOut = io({ cwd: dir });
+      expect(await runCli(['--as-of', '2025-06-01', 'analyze', '--offline'], earlyOut.value)).toBe(ExitCode.Success);
+      expect(earlyOut.out()).toContain('Blockers detected: 0');
+
+      // Later date: 2026-11-01 -> 1 unmaintained blocker
+      const lateOut = io({ cwd: dir });
+      expect(await runCli(['--as-of', '2026-11-01', 'analyze', '--offline'], lateOut.value)).toBe(ExitCode.Success);
+      expect(lateOut.out()).toContain('Blockers detected: 1');
+      expect(lateOut.err()).toContain('[unmaintained] date-sensitive-lib');
+
+      // Re-running plan with fixed --as-of gives byte-for-byte identical output
+      const plan1 = io({ cwd: dir, clock: () => new Date('2024-01-01T00:00:00Z') });
+      expect(
+        await runCli(['--as-of', '2026-11-01', 'plan', '--to', '16', '--offline', '--allow-dirty'], plan1.value),
+      ).toBe(ExitCode.Success);
+      const stepDoc1 = await readFile(path.join(dir, '.ng-migrator', 'steps', '01-angular-15-to-16.md'), 'utf8');
+      const summary1 = await readFile(path.join(dir, '.ng-migrator', 'summary.md'), 'utf8');
+      const state1 = await readFile(path.join(dir, '.ng-migrator', 'state.json'), 'utf8');
+
+      const plan2 = io({ cwd: dir, clock: () => new Date('2029-12-31T23:59:59Z') });
+      expect(
+        await runCli(['--as-of', '2026-11-01', 'plan', '--to', '16', '--offline', '--allow-dirty'], plan2.value),
+      ).toBe(ExitCode.Success);
+      const stepDoc2 = await readFile(path.join(dir, '.ng-migrator', 'steps', '01-angular-15-to-16.md'), 'utf8');
+      const summary2 = await readFile(path.join(dir, '.ng-migrator', 'summary.md'), 'utf8');
+      const state2 = await readFile(path.join(dir, '.ng-migrator', 'state.json'), 'utf8');
+
+      expect(stepDoc2).toBe(stepDoc1);
+      expect(summary2).toBe(summary1);
+      expect(state2).toBe(state1);
     } finally {
       await cleanup();
     }

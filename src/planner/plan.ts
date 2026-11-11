@@ -14,10 +14,12 @@ export interface PlanOptions {
   registry: RegistryClient;
   config: ResolvedConfig;
   verifyResolution?: boolean;
+  now?: number;
+  clock?: () => Date;
 }
 
 export async function createPlan(options: PlanOptions): Promise<Plan> {
-  const { project, targetMajor, registry, config, verifyResolution = true } = options;
+  const { project, targetMajor, registry, config, verifyResolution = true, now, clock } = options;
 
   const currentVersion = project.angular.version;
   const currentMajor = project.angular.major;
@@ -71,9 +73,11 @@ export async function createPlan(options: PlanOptions): Promise<Plan> {
       alternatesAllow: config.alternates.allow,
       alternatesDeny: config.alternates.deny,
       unmaintainedThresholdMonths: config.unmaintainedThresholdMonths,
+      now,
+      clock,
     });
 
-    let resolutionCheck: ResolutionCheck = { status: 'skipped' };
+    let resolutionCheck: ResolutionCheck = { status: 'skipped', packageManager: config.packageManager };
     if (verifyResolution && isFirstStep) {
       resolutionCheck = await verifyWithPackageManager({
         projectRoot: project.root,
@@ -94,11 +98,13 @@ export async function createPlan(options: PlanOptions): Promise<Plan> {
       if (conflicts.length > 0) {
         for (const conflict of conflicts) {
           const pkgName = conflict.requiredBy.replace(/@[^@]+$/, '');
+          const depInfo = project.dependencies.find((d) => d.name === pkgName);
+          const dependencyKind = depInfo?.type === 'devDependencies' ? 'dev-only' : 'runtime';
           const optionsList = [
             `Swap ${pkgName} for a compatible package or version supporting ${conflict.peer} in Angular ${toMajor}.`,
             `Add an explicit override in package.json under "${overrideKey}" for "${conflict.peer}".`,
           ];
-          const conflictDetails = `ERESOLVE peer dependency conflict: ${conflict.requiredBy} requires peer ${conflict.peer}@"${conflict.range}"${conflict.found ? `, but found ${conflict.found}` : ''}.`;
+          const conflictDetails = `Peer dependency conflict (${config.packageManager}): ${conflict.requiredBy} requires peer ${conflict.peer}@"${conflict.range}"${conflict.found ? `, but found ${conflict.found}` : ''}.`;
 
           const existing = stepResolution.blockers.find(
             (b) => b.package === pkgName && b.reason === 'peer-conflict',
@@ -108,6 +114,7 @@ export async function createPlan(options: PlanOptions): Promise<Plan> {
               package: pkgName,
               reason: 'peer-conflict',
               hard: true,
+              dependencyKind,
               details: conflictDetails,
               recommendedFix: `Swap ${pkgName} or add an explicit override in package.json (${overrideKey})`,
               source: 'analysis',
@@ -123,6 +130,7 @@ export async function createPlan(options: PlanOptions): Promise<Plan> {
           package: 'peer-resolution',
           reason: 'peer-conflict',
           hard: true,
+          dependencyKind: 'runtime',
           details: resolutionCheck.detail ?? 'Package manager reported peer dependency conflict during resolution check.',
           recommendedFix: `Swap conflicting package or add an explicit override in package.json (${overrideKey})`,
           source: 'analysis',

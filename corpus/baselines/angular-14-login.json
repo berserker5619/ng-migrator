@@ -8,6 +8,7 @@
   "nightly": true,
   "startingAngular": "14.2.12",
   "targetAngular": 17,
+  "asOf": "2026-11-01",
   "steps": [
     {
       "step": 1,

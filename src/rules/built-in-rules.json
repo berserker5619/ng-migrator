@@ -38,8 +38,8 @@
     "lastReleaseFor": 12,
     "category": "tooling",
     "recommendation": "alternate",
-    "alternatives": ["@angular-eslint/eslint-plugin", "eslint"],
-    "notes": "Codelyzer and TSLint are deprecated and have no releases past Angular 12; migrate to @angular-eslint/eslint-plugin."
+    "alternatives": ["TSLint to ESLint via @angular-eslint", "eslint"],
+    "notes": "Codelyzer is a dev-only TSLint rule package with no releases past Angular 12; perform a tooling migration from TSLint to ESLint via @angular-eslint (@angular-eslint/schematics and @angular-eslint/eslint-plugin)."
   }
 ]
 
