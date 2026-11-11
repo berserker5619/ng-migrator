@@ -33,3 +33,4 @@ export async function checkGitStatus(cwd: string): Promise<GitStatusResult> {
     dirtyEntries: lines,
   };
 }
+

@@ -6,6 +6,8 @@ import type {
   ProjectInfo,
   StepRequirements,
 } from '../model.js';
+import { computeRecommendation } from '../recommend/engine.js';
+import { getBuiltInRules, type MigrationRule } from '../recommend/rules.js';
 import { inAngularMajor, stableVersionsDesc, type RegistryClient } from '../registry/client.js';
 import { preserveRangeStyle, satisfiesAngularPeer } from './range.js';
 
@@ -15,6 +17,9 @@ export interface ResolveStepOptions {
   registry: RegistryClient;
   pinned?: Record<string, string>;
   neverTouch?: string[];
+  rules?: readonly MigrationRule[];
+  alternatesAllow?: readonly string[];
+  alternatesDeny?: readonly string[];
 }
 
 export interface StepResolution {
@@ -261,6 +266,28 @@ export async function resolveStepDependencies(
           current: project.dependencies.find((d) => d.name === veName)?.installed,
         });
       }
+    }
+  }
+
+  // Enrich blockers with recommendations
+  const activeRules = options.rules ?? getBuiltInRules();
+  for (const b of blockers) {
+    const rec = await computeRecommendation({
+      projectRoot: project.root,
+      blocker: b,
+      targetMajor,
+      targetCoreVersion: coreVersion,
+      registry,
+      rules: activeRules,
+      allowList: options.alternatesAllow,
+      denyList: options.alternatesDeny,
+    });
+    b.recommendation = rec.recommendation;
+    b.confidence = rec.confidence;
+    b.effort = rec.effort;
+    b.runnerUp = rec.runnerUp;
+    if (!b.details.includes('Recommendation:')) {
+      b.details = `${b.details} ${rec.reasoning}`;
     }
   }
 

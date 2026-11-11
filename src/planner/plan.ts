@@ -2,6 +2,7 @@ import semver from 'semver';
 import type { ResolvedConfig } from '../config/config.js';
 import { NgmError } from '../errors.js';
 import type { Plan, PlannedStep, ProjectInfo, ResolutionCheck } from '../model.js';
+import { loadRules } from '../recommend/rules.js';
 import type { RegistryClient } from '../registry/client.js';
 import { resolveStepDependencies } from '../resolver/resolve.js';
 import { verifyWithPackageManager } from '../resolver/verify.js';
@@ -66,6 +67,9 @@ export async function createPlan(options: PlanOptions): Promise<Plan> {
       registry,
       pinned: config.pinned,
       neverTouch: config.neverTouch,
+      rules: await loadRules(config.rules, project.root),
+      alternatesAllow: config.alternates.allow,
+      alternatesDeny: config.alternates.deny,
     });
 
     let resolutionCheck: ResolutionCheck = { status: 'skipped' };

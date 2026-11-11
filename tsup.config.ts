@@ -9,4 +9,5 @@ export default defineConfig({
   sourcemap: true,
   splitting: false,
   dts: false,
+  external: ['typescript'],
 });

@@ -35,7 +35,8 @@
   "dependencies": {
     "commander": "^15.1.0",
     "execa": "^10.2.1",
-    "semver": "^7.8.6"
+    "semver": "^7.8.6",
+    "typescript": "~6.0.0"
   },
   "devDependencies": {
     "@changesets/cli": "^3.0.3",

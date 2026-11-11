@@ -78,10 +78,14 @@ export function formatStepDocument(step: PlannedStep, stepState?: StepState): st
   } else {
     for (const b of step.blockers) {
       lines.push(`### ${b.package} (${b.reason})`);
+      if (b.recommendation) {
+        lines.push(`- Recommendation: ${b.recommendation} (confidence: ${b.confidence ?? 'medium'})`);
+      }
       lines.push(`- Details: ${b.details}`);
-      if (b.current) lines.push(`- Current: ${b.current}`);
-      if (b.lastCompatible) lines.push(`- Last compatible version: ${b.lastCompatible}`);
-      if (b.recommendation) lines.push(`- Recommendation: ${b.recommendation}`);
+      if (b.effort) lines.push(`- Estimated effort: ${b.effort}`);
+      if (b.runnerUp) lines.push(`- Runner-up: ${b.runnerUp}`);
+      if (b.current) lines.push(`- Current version: ${b.current}`);
+      if (b.lastCompatible) lines.push(`- Last compatible release: ${b.lastCompatible}`);
       lines.push('');
     }
   }

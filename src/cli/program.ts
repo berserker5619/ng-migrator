@@ -9,11 +9,13 @@ import {
   type PackageManager,
 } from '../config/config.js';
 import { ExitCode, NgmError, isNgmError } from '../errors.js';
+import { isPortInUse } from '../platform/doctor.js';
 import { checkGitStatus } from '../platform/git.js';
 import { writeGeneratedText } from '../platform/text.js';
 import { getStepRequirements } from '../planner/metadata.js';
 import { createPlan } from '../planner/plan.js';
 import { readProject } from '../reader/project.js';
+import { loadRules } from '../recommend/rules.js';
 import { RegistryClient } from '../registry/client.js';
 import { loadNpmrc } from '../registry/npmrc.js';
 import { resolveStepDependencies } from '../resolver/resolve.js';
@@ -107,6 +109,14 @@ export function createProgram(io: CliIo, getOutput: () => Output): Command {
         out.error(`Project check failed: ${(err as Error).message}`);
       }
 
+      // 4. Running dev server check (locks files on Windows)
+      const portBusy = await isPortInUse(4200);
+      if (portBusy) {
+        out.warn('Port 4200 is active: an Angular dev server (ng serve) may be running. Stop it before upgrading to prevent file lock errors.');
+      } else {
+        out.success('Port 4200: free (no running ng serve dev server detected)');
+      }
+
       out.info('\nDoctor check completed.');
     });
 
@@ -140,12 +150,16 @@ export function createProgram(io: CliIo, getOutput: () => Output): Command {
       out.info(`Current Angular: ${project.angular.version} (major ${currentMajor}) -> Target step: ${nextMajor}\n`);
 
       const requirements = await getStepRequirements(nextMajor, registry);
+      const rules = await loadRules(config.rules, io.cwd);
       const resolution = await resolveStepDependencies({
         project,
         requirements,
         registry,
         pinned: config.pinned,
         neverTouch: config.neverTouch,
+        rules,
+        alternatesAllow: config.alternates.allow,
+        alternatesDeny: config.alternates.deny,
       });
 
       out.info(`Dependencies analyzed: ${project.dependencies.length}`);
