@@ -46,3 +46,4 @@ describe('usage analysis', () => {
     expect(footprint.isSmallFootprint).toBe(true);
   });
 });
+

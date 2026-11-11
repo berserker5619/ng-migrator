@@ -41,3 +41,4 @@ export function findRule(packageName: string, rules: readonly MigrationRule[]): 
   // Exact match first, then prefix match
   return rules.find((r) => r.package === packageName);
 }
+
