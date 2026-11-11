@@ -20,8 +20,6 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
       - run: npm ci
       - run: npm run check
-      - name: Publish package to npm
+      - name: Publish package to npm via OIDC Trusted Publishing
         run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
