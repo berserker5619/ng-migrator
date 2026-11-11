@@ -93,3 +93,4 @@ For complex dependencies where a healthy community alternative exists:
   "notes": "ngx-popper is no longer maintained. Migrate to Floating UI or Angular CDK Overlay."
 }
 ```
+

@@ -90,3 +90,4 @@ Every error emitted by `ng-migrator` has a stable identifier prefixed with `NGM-
 ### `NGM-6004`: Registry unreachable or offline cache missing
 - **Cause:** Network connectivity failure, or `--offline` was passed without a populated cache.
 - **Action:** Check your network connection or run once online to populate `.ng-migrator/cache`.
+

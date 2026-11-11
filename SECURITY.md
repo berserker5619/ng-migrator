@@ -22,3 +22,4 @@
 If you discover a potential security vulnerability in `ng-migrator`, please report it privately rather than opening a public issue.
 
 Send vulnerability details to the project maintainers via GitHub private security advisories or by emailing `nizamudeen5619@gmail.com`.
+
