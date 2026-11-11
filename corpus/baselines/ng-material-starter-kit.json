@@ -3,6 +3,9 @@
   "repository": "https://github.com/Lowgular/ng-material-starter-kit",
   "commit": "741803635b0fb3a8070a1e09dc503b739538a780",
   "license": "unknown",
+  "tier": "local-only",
+  "ci": false,
+  "nightly": false,
   "startingAngular": "14.2.2",
   "targetAngular": 16,
   "steps": [
@@ -17,9 +20,10 @@
           "hard": false,
           "evidence": "declared compatible",
           "unmaintained": true,
-          "expectedRecommendation": "alternate",
-          "recommendedFix": "CSS flexbox/grid",
-          "runnerUp": "Tailwind CSS"
+          "expectedRecommendation": "remove",
+          "recommendedFix": "remove the unused dependency",
+          "confidence": "high",
+          "runnerUp": "CSS flexbox/grid, Tailwind CSS"
         }
       ]
     },
@@ -30,11 +34,14 @@
       "expectedBlockers": [
         {
           "package": "@angular/flex-layout",
-          "reason": "no-compatible-version",
-          "hard": true,
-          "expectedRecommendation": "alternate",
-          "recommendedFix": "CSS flexbox/grid",
-          "runnerUp": "Tailwind CSS"
+          "reason": "deprecated",
+          "hard": false,
+          "evidence": "declared compatible",
+          "unmaintained": true,
+          "expectedRecommendation": "remove",
+          "recommendedFix": "remove the unused dependency",
+          "confidence": "high",
+          "runnerUp": "CSS flexbox/grid, Tailwind CSS"
         }
       ]
     }

@@ -93,8 +93,14 @@ export async function createPlan(options: PlanOptions): Promise<Plan> {
     }
 
     const risks: string[] = [];
-    if (stepResolution.blockers.length > 0) {
-      risks.push(`${stepResolution.blockers.length} dependency blocker(s) require resolution before this step.`);
+    const hardCount = stepResolution.blockers.filter((b) => b.hard).length;
+    if (hardCount > 0) {
+      risks.push(`${hardCount} hard dependency blocker(s) require resolution before this step.`);
+    }
+    for (const b of stepResolution.blockers) {
+      if (b.riskNote) {
+        risks.push(b.riskNote);
+      }
     }
     if (resolutionCheck.status === 'conflict') {
       risks.push('Package manager reported peer dependency conflicts during resolution check.');

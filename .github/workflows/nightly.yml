@@ -1,0 +1,62 @@
+name: Nightly Corpus
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  discover:
+    name: Filter CI-safe corpus baselines (exclude local-only)
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.filter.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - id: filter
+        run: |
+          node -e '
+            const fs = require("node:fs");
+            const path = require("node:path");
+            const dir = "corpus/baselines";
+            const files = fs.readdirSync(dir).filter(f => f.endsWith(".json"));
+            const entries = files
+              .map(f => JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")))
+              .filter(b => b.tier === "ci" && b.ci === true && b.nightly === true && b.license && b.license !== "unknown");
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, "matrix=" + JSON.stringify(entries) + "\n");
+          '
+
+  corpus:
+    name: Corpus / ${{ matrix.entry.name }}
+    needs: discover
+    if: ${{ needs.discover.outputs.matrix != '[]' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        entry: ${{ fromJson(needs.discover.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Clone pinned baseline commit and run non-destructive plan
+        run: |
+          mkdir -p /tmp/corpus/${{ matrix.entry.name }}
+          git -C /tmp/corpus/${{ matrix.entry.name }} init
+          git -C /tmp/corpus/${{ matrix.entry.name }} remote add origin ${{ matrix.entry.repository }}
+          git -C /tmp/corpus/${{ matrix.entry.name }} fetch --depth 1 origin ${{ matrix.entry.commit }}
+          git -C /tmp/corpus/${{ matrix.entry.name }} checkout FETCH_HEAD
+          cd /tmp/corpus/${{ matrix.entry.name }}
+          node "$GITHUB_WORKSPACE/dist/cli.js" doctor
+          node "$GITHUB_WORKSPACE/dist/cli.js" analyze
+          node "$GITHUB_WORKSPACE/dist/cli.js" plan --to ${{ matrix.entry.targetAngular }}

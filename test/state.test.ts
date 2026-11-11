@@ -59,18 +59,31 @@ describe('lock', () => {
     await expect(readFile(lockPath(dir))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
-  it('reports a stale lock from a dead process instead of removing it', async () => {
+  it('reports a stale lock from a dead process with instructions on how to clear it, instead of removing it', async () => {
     await mkdir(path.dirname(lockPath(dir)), { recursive: true });
     // A pid this high is not a live process on any CI runner.
     const stale = { pid: 2 ** 22 + 12345, hostname: os.hostname(), command: 'plan', startedAt: '2026-01-01T00:00:00Z' };
     await writeFile(lockPath(dir), JSON.stringify(stale));
-    await expect(acquireLock(dir, 'plan')).rejects.toMatchObject({ id: 'NGM-3003' });
+    await expect(acquireLock(dir, 'plan')).rejects.toMatchObject({
+      id: 'NGM-3003',
+      message: expect.stringContaining('ended without releasing .ng-migrator/lock'),
+      hint: 'Make sure no ng-migrator is running, then delete .ng-migrator/lock.',
+    });
     expect(JSON.parse(await readFile(lockPath(dir), 'utf8'))).toEqual(stale);
   });
 
-  it('releases the lock even if the work throws', async () => {
-    await expect(withLock(dir, 'plan', async () => Promise.reject(new Error('boom')))).rejects.toThrow('boom');
+  it('releases the lock even if the work throws or is interrupted', async () => {
+    await expect(withLock(dir, 'plan', async () => Promise.reject(new Error('interrupted')))).rejects.toThrow('interrupted');
+    await expect(readFile(lockPath(dir))).rejects.toMatchObject({ code: 'ENOENT' });
     await acquireLock(dir, 'plan').then((l) => l.release());
+  });
+
+  it('releases the lock file on process exit interruption', async () => {
+    const lock = await acquireLock(dir, 'plan');
+    // Simulate process exit listener firing before async release()
+    process.emit('exit', 1);
+    await expect(readFile(lockPath(dir))).rejects.toMatchObject({ code: 'ENOENT' });
+    await lock.release();
   });
 });
 

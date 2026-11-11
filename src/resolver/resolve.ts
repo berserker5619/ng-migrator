@@ -42,8 +42,12 @@ export function isPackageUnmaintained(
   rule: MigrationRule | undefined,
   thresholdMonths: number = 18,
   nowMs: number = Date.now(),
+  targetMajor?: number,
 ): boolean {
   if (rule?.status === 'deprecated' || rule?.status === 'abandoned') {
+    return true;
+  }
+  if (rule?.lastReleaseFor !== undefined && (targetMajor === undefined || targetMajor >= rule.lastReleaseFor)) {
     return true;
   }
   const meta = pack.versions[version];
@@ -120,25 +124,16 @@ export async function resolveStepDependencies(
         continue;
       }
 
-      // Check if rule says lastReleaseFor and targetMajor > lastReleaseFor
-      if (rule?.lastReleaseFor && targetMajor > rule.lastReleaseFor) {
-        blockers.push({
-          package: dep.name,
-          reason: 'no-compatible-version',
-          hard: true,
-          details: `No release of ${dep.name} found for Angular ${targetMajor}. Last release was for Angular ${rule.lastReleaseFor}.`,
-          current: dep.installed ?? dep.declared,
-        });
-        continue;
-      }
-
       const allReleases = allVersionsDesc(pack);
       const versions = allReleases.filter((v) => {
         const meta = pack.versions[v];
         if (inAngularMajor(v, targetMajor)) {
           return satisfiesAngularPeer(meta?.peerDependencies, coreVersion, targetMajor, v);
         }
-        return satisfiesAngularPeer(meta?.peerDependencies, coreVersion, targetMajor, v);
+        const hasExplicitAngularPeer =
+          meta?.peerDependencies?.['@angular/core'] !== undefined ||
+          meta?.peerDependencies?.['@angular/common'] !== undefined;
+        return hasExplicitAngularPeer && satisfiesAngularPeer(meta?.peerDependencies, coreVersion, targetMajor, v);
       });
 
       if (versions.length === 0) {
@@ -156,7 +151,7 @@ export async function resolveStepDependencies(
       const targetVersion = versions.find((v) => semver.prerelease(v) === null) ?? versions[0]!;
       const meta = pack.versions[targetVersion];
       const isDeprecated = Boolean(meta?.deprecated);
-      const isUnmaint = isPackageUnmaintained(pack, targetVersion, rule, unmaintainedThresholdMonths, now);
+      const isUnmaint = isPackageUnmaintained(pack, targetVersion, rule, unmaintainedThresholdMonths, now, targetMajor);
 
       changes.push({
         name: dep.name,
@@ -171,12 +166,22 @@ export async function resolveStepDependencies(
         unmaintained: isUnmaint,
       });
 
-      if (isDeprecated) {
+      if (isDeprecated || isUnmaint) {
+        const reason = isDeprecated ? 'deprecated' : 'unmaintained';
+        const riskNote =
+          rule?.lastReleaseFor && targetMajor > rule.lastReleaseFor
+            ? `Open-ended peer range on ${dep.name}@${targetVersion} declares compatibility with Angular ${targetMajor}, but last release was for Angular ${rule.lastReleaseFor} (unmaintained).`
+            : isDeprecated
+              ? `Package ${dep.name}@${targetVersion} is deprecated${isUnmaint ? ' and unmaintained' : ''}; peer range declares compatibility with Angular ${targetMajor}.`
+              : `Package ${dep.name}@${targetVersion} is unmaintained; peer range declares compatibility with Angular ${targetMajor}.`;
         blockers.push({
           package: dep.name,
-          reason: 'deprecated',
+          reason,
           hard: false,
-          details: meta?.deprecated ?? `Package ${dep.name} is deprecated on npm.`,
+          evidence: 'declared',
+          unmaintained: isUnmaint,
+          riskNote,
+          details: meta?.deprecated ?? `Package ${dep.name} is ${reason}.`,
           current: dep.installed ?? dep.declared,
         });
       }
@@ -266,6 +271,17 @@ export async function resolveStepDependencies(
     }
 
     const allReleases = allVersionsDesc(pack);
+    const hasAngularPeer = allReleases.some(
+      (v) =>
+        pack.versions[v]?.peerDependencies?.['@angular/core'] !== undefined ||
+        pack.versions[v]?.peerDependencies?.['@angular/common'] !== undefined,
+    );
+
+    if (!hasAngularPeer && !rule) {
+      // Package does not have Angular peer dependencies (e.g. lodash, date-fns, karma)
+      unchanged.push(dep.name);
+      continue;
+    }
 
     // Look for newer releases that require Angular > targetMajor (held back)
     for (const v of allReleases) {
@@ -284,19 +300,17 @@ export async function resolveStepDependencies(
       }
     }
 
-    // Check if rule says lastReleaseFor and targetMajor > lastReleaseFor
-    let hasReleaseForTarget = true;
-    if (rule?.lastReleaseFor && targetMajor > rule.lastReleaseFor) {
-      hasReleaseForTarget = false;
-    }
-
-    // Propose newest version compatible with target Angular
-    const compatible = hasReleaseForTarget
-      ? allReleases.filter((v) => {
-          const meta = pack.versions[v];
-          return satisfiesAngularPeer(meta?.peerDependencies, coreVersion, targetMajor, v);
-        })
-      : [];
+    // Propose newest version compatible with target Angular based strictly on peer ranges
+    const compatible = allReleases.filter((v) => {
+      const meta = pack.versions[v];
+      if (hasAngularPeer) {
+        const versionHasPeer =
+          meta?.peerDependencies?.['@angular/core'] !== undefined ||
+          meta?.peerDependencies?.['@angular/common'] !== undefined;
+        if (!versionHasPeer) return false;
+      }
+      return satisfiesAngularPeer(meta?.peerDependencies, coreVersion, targetMajor, v);
+    });
 
     const targetVersion = compatible.find((v) => semver.prerelease(v) === null) ?? compatible[0];
 
@@ -304,7 +318,7 @@ export async function resolveStepDependencies(
       const meta = pack.versions[targetVersion];
       const currentVersion = dep.installed ?? semver.minVersion(dep.declared)?.version;
       const isDeprecated = Boolean(meta?.deprecated);
-      const isUnmaint = isPackageUnmaintained(pack, targetVersion, rule, unmaintainedThresholdMonths, now);
+      const isUnmaint = isPackageUnmaintained(pack, targetVersion, rule, unmaintainedThresholdMonths, now, targetMajor);
 
       if (currentVersion && semver.eq(currentVersion, targetVersion) && !isDeprecated && !isUnmaint) {
         unchanged.push(dep.name);
@@ -323,39 +337,39 @@ export async function resolveStepDependencies(
         });
       }
 
-      if (isDeprecated) {
+      if (isDeprecated || isUnmaint) {
+        const reason = isDeprecated ? 'deprecated' : 'unmaintained';
+        const riskNote =
+          rule?.lastReleaseFor && targetMajor > rule.lastReleaseFor
+            ? `Open-ended peer range on ${dep.name}@${targetVersion} declares compatibility with Angular ${targetMajor}, but last release was for Angular ${rule.lastReleaseFor} (unmaintained).`
+            : isDeprecated
+              ? `Package ${dep.name}@${targetVersion} is deprecated${isUnmaint ? ' and unmaintained' : ''}; peer range declares compatibility with Angular ${targetMajor}.`
+              : `Package ${dep.name}@${targetVersion} is unmaintained; peer range declares compatibility with Angular ${targetMajor}.`;
         blockers.push({
           package: dep.name,
-          reason: 'deprecated',
+          reason,
           hard: false,
-          details: meta?.deprecated ?? `Package ${dep.name} is deprecated on npm.`,
+          evidence: 'declared',
+          unmaintained: isUnmaint,
+          riskNote,
+          details: meta?.deprecated ?? `Package ${dep.name} is ${reason}.`,
           current: dep.installed ?? dep.declared,
         });
       }
     } else {
-      // Check if it actually declares an Angular peer dependency or rule specifies lastReleaseFor
-      const hasAngularPeer = allReleases.some(
-        (v) => pack.versions[v]?.peerDependencies?.['@angular/core'] !== undefined,
+      // Find last version that supported targetMajor - 1
+      const lastCompat = allReleases.find((v) =>
+        satisfiesAngularPeer(pack.versions[v]?.peerDependencies, `${targetMajor - 1}.99.99`, targetMajor - 1, v),
       );
 
-      if (hasAngularPeer || rule?.lastReleaseFor) {
-        // Find last version that supported targetMajor - 1
-        const lastCompat = allReleases.find((v) =>
-          satisfiesAngularPeer(pack.versions[v]?.peerDependencies, `${targetMajor - 1}.99.99`, targetMajor - 1, v),
-        );
-
-        blockers.push({
-          package: dep.name,
-          reason: 'no-compatible-version',
-          hard: true,
-          details: `No release of ${dep.name} supports @angular/core ${coreVersion}.`,
-          current: dep.installed ?? dep.declared,
-          lastCompatible: lastCompat,
-        });
-      } else {
-        // Package does not have Angular peer dependencies (e.g. lodash, date-fns)
-        unchanged.push(dep.name);
-      }
+      blockers.push({
+        package: dep.name,
+        reason: 'no-compatible-version',
+        hard: true,
+        details: `No release of ${dep.name} supports @angular/core ${coreVersion}.`,
+        current: dep.installed ?? dep.declared,
+        lastCompatible: lastCompat,
+      });
     }
   }
 

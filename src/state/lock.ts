@@ -1,3 +1,4 @@
+import { rmSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -67,8 +68,20 @@ export async function acquireLock(root: string, command: string, now: Date = new
   }
 
   let released = false;
+  const onExitCleanup = () => {
+    if (released) return;
+    released = true;
+    try {
+      rmSync(file, { force: true });
+    } catch {
+      // ignore on exit
+    }
+  };
+  process.on('exit', onExitCleanup);
+
   return {
     async release() {
+      process.off('exit', onExitCleanup);
       if (released) return;
       released = true;
       await removeWithRetry(file);

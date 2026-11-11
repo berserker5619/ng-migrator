@@ -17,7 +17,7 @@ export interface RecommendOptions {
 }
 
 export interface RecommendationResult {
-  recommendation: 'upgrade' | 'alternate' | 'fork' | 'inline' | 'manual';
+  recommendation: 'upgrade' | 'alternate' | 'fork' | 'inline' | 'remove' | 'manual';
   source: 'analysis' | 'rule';
   confidence: 'high' | 'medium' | 'low';
   effort: string;
@@ -67,6 +67,40 @@ export async function computeRecommendation(
             : `${usage.files.length} file(s), ${usage.templateOccurrences} template usage(s), imports: [${usage.importedSymbols.join(', ')}]`,
       }
     : undefined;
+
+  // 0. Zero usage in project source files -> recommend removing the unused dependency
+  const isUnused =
+    usage !== undefined &&
+    usage.scannedSourceFilesCount > 0 &&
+    usage.files.length === 0 &&
+    usage.templateOccurrences === 0 &&
+    usage.importedSymbols.length === 0 &&
+    usage.callSiteCount === 0;
+
+  if (isUnused && usage) {
+    let demotedRunnerUp = 'alternate package';
+    if (rule?.alternatives && rule.alternatives.length > 0) {
+      const preferred = ['CSS flexbox/grid', 'Tailwind CSS'];
+      const orderedNames = [
+        ...preferred.filter((p) => rule.alternatives!.includes(p)),
+        ...rule.alternatives.filter((a) => !preferred.includes(a)),
+      ];
+      demotedRunnerUp = orderedNames.join(', ');
+    } else if (rule?.recommendation === 'inline') {
+      demotedRunnerUp = 'Write replacement in project codebase';
+    }
+
+    return {
+      recommendation: 'remove',
+      recommendedFix: 'remove the unused dependency',
+      source: 'analysis',
+      confidence: 'high',
+      effort: '5 minutes (remove from package.json)',
+      runnerUp: demotedRunnerUp,
+      reasoning: `No imports or template usages of ${blocker.package} were found across ${usage.scannedSourceFilesCount} source file(s).${rule?.notes ? ` ${rule.notes}` : ''}`,
+      usage: usageData,
+    };
+  }
 
   // 1. Explicit Rule Recommendation (if defined in built-in or user rules)
   if (rule?.recommendation) {

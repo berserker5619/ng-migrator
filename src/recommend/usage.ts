@@ -10,6 +10,7 @@ export interface UsageFootprint {
   callSiteCount: number;
   templateOccurrences: number;
   isSmallFootprint: boolean;
+  scannedSourceFilesCount: number;
 }
 
 /**
@@ -20,7 +21,9 @@ export async function analyzePackageUsage(
   projectRoot: string,
   packageName: string,
 ): Promise<UsageFootprint> {
-  const tsFiles = await walkProject(projectRoot, { extensions: ['.ts'] });
+  const tsFiles = (await walkProject(projectRoot, { extensions: ['.ts'] })).filter(
+    (f) => !f.endsWith('.d.ts'),
+  );
   const htmlFiles = await walkProject(projectRoot, { extensions: ['.html'] });
 
   const referencingFiles = new Set<string>();
@@ -29,13 +32,26 @@ export async function analyzePackageUsage(
   let templateOccurrences = 0;
 
   for (const relFile of tsFiles) {
-    if (relFile.endsWith('.d.ts')) continue;
     const fullPath = path.join(projectRoot, relFile);
     let code: string;
     try {
       code = await readFile(fullPath, 'utf8');
     } catch {
       continue;
+    }
+
+    // Also scan inline templates in TypeScript components (before checking code.includes(packageName),
+    // because NgModule apps often import FlexLayoutModule in AppModule while using fx* in component inline templates)
+    if (packageName === '@angular/flex-layout' && code.includes('template')) {
+      const inlineTemplateMatch = /template\s*:\s*(['"`])([\s\S]*?)\1/.exec(code);
+      if (inlineTemplateMatch && inlineTemplateMatch[2]) {
+        const inlineTpl = inlineTemplateMatch[2];
+        const fxMatches = inlineTpl.match(/\b(fx[A-Z][a-zA-Z0-9]*|fx[a-z-]+)\b/g);
+        if (fxMatches) {
+          templateOccurrences += fxMatches.length;
+          referencingFiles.add(relFile);
+        }
+      }
     }
 
     if (!code.includes(packageName)) continue;
@@ -88,19 +104,6 @@ export async function analyzePackageUsage(
       ts.forEachChild(node, visit);
     }
 
-    // Also scan inline templates in TypeScript components
-    const inlineTemplateMatch = /template\s*:\s*[`'"]([\s\S]*?)[`'"]/.exec(code);
-    if (inlineTemplateMatch && inlineTemplateMatch[1]) {
-      const inlineTpl = inlineTemplateMatch[1];
-      if (packageName === '@angular/flex-layout') {
-        const fxMatches = inlineTpl.match(/\b(fx[A-Z][a-zA-Z0-9]*|fx[a-z-]+)\b/g);
-        if (fxMatches) {
-          templateOccurrences += fxMatches.length;
-          referencingFiles.add(relFile);
-        }
-      }
-    }
-
     visit(sourceFile);
   }
 
@@ -143,6 +146,7 @@ export async function analyzePackageUsage(
     callSiteCount,
     templateOccurrences,
     isSmallFootprint,
+    scannedSourceFilesCount: tsFiles.length + htmlFiles.length,
   };
 }
 

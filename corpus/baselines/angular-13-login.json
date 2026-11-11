@@ -3,6 +3,9 @@
   "repository": "https://github.com/bezkoder/angular-13-login-registration-example",
   "commit": "8eb9d13516642e15bc64e4ae157bf019a7872912",
   "license": "unknown",
+  "tier": "local-only",
+  "ci": false,
+  "nightly": false,
   "startingAngular": "13.0.3",
   "targetAngular": 16,
   "steps": [

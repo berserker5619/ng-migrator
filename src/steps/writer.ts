@@ -12,6 +12,7 @@ import {
   type MigratorState,
   type StepState,
 } from '../state/state.js';
+import { TOOL_VERSION } from '../version.js';
 
 export interface WritePlanResult {
   stateFile: string;
@@ -44,7 +45,7 @@ export function formatStepDocument(
 
   lines.push(`# Step ${step.index}: Angular ${step.from} to ${step.to}${provisionalSuffix}`);
   lines.push('');
-  lines.push(`Status: ${status} | Tool: 1.0.0`);
+  lines.push(`Status: ${status} | Tool: ${TOOL_VERSION}`);
   lines.push('');
 
   lines.push('## Requirements');
@@ -102,6 +103,10 @@ export function formatStepDocument(
     for (const b of step.blockers) {
       const typeLabel = b.hard ? '' : ' [soft / unmaintained]';
       lines.push(`### ${b.package} (${b.reason})${typeLabel}`);
+      if (b.evidence) {
+        const evLabel = b.evidence === 'verified' ? 'verified by build' : 'declared compatible';
+        lines.push(`- Evidence: ${evLabel}`);
+      }
       if (b.recommendedFix) {
         lines.push(`- Recommended fix: ${b.recommendedFix}`);
       } else if (b.recommendation) {
@@ -114,6 +119,9 @@ export function formatStepDocument(
         lines.push(`- Confidence: ${b.confidence}`);
       }
       lines.push(`- Reasoning: ${b.details}`);
+      if (b.riskNote) {
+        lines.push(`- Risk note: ${b.riskNote}`);
+      }
       if (b.effort) {
         lines.push(`- Estimated effort: ${b.effort}`);
       }
@@ -133,6 +141,14 @@ export function formatStepDocument(
     }
   }
   lines.push('');
+
+  if (step.risks.length > 0) {
+    lines.push('## Risks');
+    for (const r of step.risks) {
+      lines.push(`- ${r}`);
+    }
+    lines.push('');
+  }
 
   lines.push('## Planned actions');
   step.actions.forEach((act, idx) => {

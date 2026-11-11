@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Packument, RegistryClient } from '../src/registry/client.js';
@@ -70,6 +70,20 @@ describe('synthetic corpus fixtures', () => {
       }),
     );
 
+    await mkdir(path.join(dir, 'src', 'app'), { recursive: true });
+    await writeFile(
+      path.join(dir, 'src', 'app', 'app.component.ts'),
+      `
+      import { Component } from '@angular/core';
+      import { FlexLayoutModule } from '@angular/flex-layout';
+      @Component({
+        selector: 'app-root',
+        template: '<div fxLayout="row" fxFlex="100">Hello</div>'
+      })
+      export class AppComponent { mod = FlexLayoutModule; }
+      `,
+    );
+
     const mockRegistry = makeMockRegistry({
       '@angular/flex-layout': flexPackument,
     });
@@ -93,27 +107,80 @@ describe('synthetic corpus fixtures', () => {
     expect(step1.from).toBe(14);
     expect(step1.to).toBe(15);
 
-    const flexChange = step1.changes.find((c) => c.name === '@angular/flex-layout');
-    expect(flexChange).toBeDefined();
-    expect(flexChange?.target).toBe('15.0.0-beta.42');
-    expect(flexChange?.evidence).toBe('declared');
-    expect(flexChange?.unmaintained).toBe(true);
-    expect(flexChange?.deprecated).toBeDefined();
+    const flexChange1 = step1.changes.find((c) => c.name === '@angular/flex-layout');
+    expect(flexChange1).toBeDefined();
+    expect(flexChange1?.target).toBe('15.0.0-beta.42');
+    expect(flexChange1?.evidence).toBe('declared');
+    expect(flexChange1?.unmaintained).toBe(true);
+    expect(flexChange1?.deprecated).toBeDefined();
 
-    // In step 14 -> 15, it must NOT be a hard blocker!
-    const softBlocker = step1.blockers.find((b) => b.package === '@angular/flex-layout');
-    expect(softBlocker).toBeDefined();
-    expect(softBlocker?.reason).toBe('deprecated');
-    expect(softBlocker?.hard).toBe(false);
+    // In step 14 -> 15, it must be a soft blocker
+    const softBlocker1 = step1.blockers.find((b) => b.package === '@angular/flex-layout');
+    expect(softBlocker1).toBeDefined();
+    expect(softBlocker1?.reason).toBe('deprecated');
+    expect(softBlocker1?.hard).toBe(false);
+    expect(softBlocker1?.evidence).toBe('declared');
+    expect(softBlocker1?.unmaintained).toBe(true);
+    expect(softBlocker1?.riskNote).toBeDefined();
+    expect(softBlocker1?.recommendedFix).toBe('CSS flexbox/grid');
+    expect(softBlocker1?.runnerUp).toBe('Tailwind CSS');
 
-    // Step 2: Angular 15 -> 16: Flex-layout had no release past 15 (lastReleaseFor: 15)
+    // Step 2: Angular 15 -> 16: 15.0.0-beta.42 has open-ended peer >=15.0.2, so it is also a SOFT blocker!
     const step2 = plan.steps[1]!;
     expect(step2.from).toBe(15);
     expect(step2.to).toBe(16);
-    const hardBlocker = step2.blockers.find((b) => b.package === '@angular/flex-layout');
-    expect(hardBlocker).toBeDefined();
-    expect(hardBlocker?.reason).toBe('no-compatible-version');
-    expect(hardBlocker?.hard).toBe(true);
+    const softBlocker2 = step2.blockers.find((b) => b.package === '@angular/flex-layout');
+    expect(softBlocker2).toBeDefined();
+    expect(softBlocker2?.reason).toBe('deprecated');
+    expect(softBlocker2?.hard).toBe(false);
+    expect(softBlocker2?.evidence).toBe('declared');
+    expect(softBlocker2?.unmaintained).toBe(true);
+    expect(softBlocker2?.riskNote).toContain('last release was for Angular 15');
+    expect(step2.risks.some((r) => r.includes('last release was for Angular 15'))).toBe(true);
+  });
+
+  it('15 to 16 step: lastReleaseFor rule adds unmaintained flag and risk note but never overrides open-ended peer-range evidence', async () => {
+    const fixturePath = path.resolve(__dirname, 'fixtures', 'registry', '%40angular%2Fflex-layout.json');
+    const fixtureRaw = JSON.parse(await readFile(fixturePath, 'utf8')) as { packument: Packument };
+    const flexPackument = fixtureRaw.packument;
+
+    await writeFile(
+      path.join(dir, 'package.json'),
+      JSON.stringify({
+        name: 'fixture-flex-15-to-16',
+        dependencies: {
+          '@angular/core': '^15.2.0',
+          '@angular/flex-layout': '^15.0.0-beta.42',
+        },
+      }),
+    );
+
+    const mockRegistry = makeMockRegistry({
+      '@angular/flex-layout': flexPackument,
+    });
+
+    const project = await readProject(dir);
+    const config = resolveConfig({}, {}, { packageManager: 'npm' });
+    const plan = await createPlan({
+      project,
+      targetMajor: 16,
+      registry: mockRegistry,
+      config,
+      verifyResolution: false,
+    });
+
+    expect(plan.steps).toHaveLength(1);
+    const step = plan.steps[0]!;
+    expect(step.from).toBe(15);
+    expect(step.to).toBe(16);
+
+    const blocker = step.blockers.find((b) => b.package === '@angular/flex-layout');
+    expect(blocker).toBeDefined();
+    expect(blocker?.hard).toBe(false);
+    expect(blocker?.reason).toBe('deprecated');
+    expect(blocker?.evidence).toBe('declared');
+    expect(blocker?.unmaintained).toBe(true);
+    expect(blocker?.riskNote).toContain('Open-ended peer range');
   });
 
   it('Synthetic Fixture (b): scoped package name resolution and stable decision IDs', async () => {
@@ -243,5 +310,89 @@ describe('synthetic corpus fixtures', () => {
     expect(ngccBlocker).toBeDefined();
     expect(ngccBlocker?.reason).toBe('ivy-or-ngcc');
     expect(ngccBlocker?.hard).toBe(true);
+  });
+
+  it('Synthetic Fixture (e): unused package recommends "remove the unused dependency" with high confidence and demotes CSS flexbox/grid and Tailwind to runner-ups', async () => {
+    const fixturePath = path.resolve(__dirname, 'fixtures', 'registry', '%40angular%2Fflex-layout.json');
+    const fixtureRaw = JSON.parse(await readFile(fixturePath, 'utf8')) as { packument: Packument };
+    const flexPackument = fixtureRaw.packument;
+
+    await writeFile(
+      path.join(dir, 'package.json'),
+      JSON.stringify({
+        name: 'fixture-unused-package',
+        dependencies: {
+          '@angular/core': '^14.2.0',
+          '@angular/flex-layout': '^14.0.0-beta.40',
+        },
+      }),
+    );
+
+    // Project has source files, none of which import or use @angular/flex-layout
+    await mkdir(path.join(dir, 'src', 'app'), { recursive: true });
+    await writeFile(
+      path.join(dir, 'src', 'app', 'app.component.ts'),
+      `
+      import { Component } from '@angular/core';
+      @Component({ selector: 'app-root', templateUrl: './app.component.html' })
+      export class AppComponent {}
+      `,
+    );
+    await writeFile(
+      path.join(dir, 'src', 'app', 'app.component.html'),
+      `<div class="container"><h1>Welcome</h1></div>`,
+    );
+
+    const mockRegistry = makeMockRegistry({
+      '@angular/flex-layout': flexPackument,
+    });
+
+    const project = await readProject(dir);
+    const config = resolveConfig({}, {}, { packageManager: 'npm' });
+    const plan = await createPlan({
+      project,
+      targetMajor: 16,
+      registry: mockRegistry,
+      config,
+      verifyResolution: false,
+    });
+
+    const step1 = plan.steps[0]!;
+    const blocker = step1.blockers.find((b) => b.package === '@angular/flex-layout');
+    expect(blocker).toBeDefined();
+    expect(blocker?.recommendation).toBe('remove');
+    expect(blocker?.recommendedFix).toBe('remove the unused dependency');
+    expect(blocker?.confidence).toBe('high');
+    expect(blocker?.source).toBe('analysis');
+    expect(blocker?.runnerUp).toBe('CSS flexbox/grid, Tailwind CSS');
+    expect(blocker?.usage?.filesCount).toBe(0);
+    expect(blocker?.usage?.templateUsages).toBe(0);
+  });
+
+  it('enforces corpus baseline license hygiene: unknown licenses are local-only and excluded from CI/nightly', async () => {
+    const baselinesDir = path.resolve(__dirname, '..', 'corpus', 'baselines');
+    const files = (await readdir(baselinesDir)).filter((f) => f.endsWith('.json'));
+    expect(files.length).toBeGreaterThanOrEqual(3);
+
+    const baselines = await Promise.all(
+      files.map(async (f) => JSON.parse(await readFile(path.join(baselinesDir, f), 'utf8')) as Record<string, unknown>),
+    );
+
+    for (const b of baselines) {
+      if (b.license === 'unknown') {
+        expect(b.tier).toBe('local-only');
+        expect(b.ci).toBe(false);
+        expect(b.nightly).toBe(false);
+      } else {
+        expect(b.tier).toBe('ci');
+        expect(b.ci).toBe(true);
+        expect(b.nightly).toBe(true);
+      }
+    }
+
+    const ciEligible = baselines.filter(
+      (b) => b.tier === 'ci' && b.ci === true && b.nightly === true && b.license !== 'unknown',
+    );
+    expect(ciEligible.map((b) => b.name)).toEqual(['angular-14-login']);
   });
 });

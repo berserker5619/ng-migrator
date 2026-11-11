@@ -45,5 +45,36 @@ describe('usage analysis', () => {
     expect(footprint.templateOccurrences).toBeGreaterThanOrEqual(1);
     expect(footprint.isSmallFootprint).toBe(true);
   });
+
+  it('detects fx* directives in inline component templates even when FlexLayoutModule is imported in a separate module file', async () => {
+    await mkdir(path.join(dir, 'src', 'app'), { recursive: true });
+
+    await writeFile(
+      path.join(dir, 'src', 'app', 'app.module.ts'),
+      `
+      import { NgModule } from '@angular/core';
+      import { FlexLayoutModule } from '@angular/flex-layout';
+      @NgModule({ imports: [FlexLayoutModule] })
+      export class AppModule {}
+      `,
+    );
+
+    await writeFile(
+      path.join(dir, 'src', 'app', 'header.component.ts'),
+      `
+      import { Component } from '@angular/core';
+      @Component({
+        selector: 'app-header',
+        template: '<div fxLayout="row" fxLayoutAlign="space-between center"><span fxFlex="50">Logo</span></div>'
+      })
+      export class HeaderComponent {}
+      `,
+    );
+
+    const footprint = await analyzePackageUsage(dir, '@angular/flex-layout');
+    expect(footprint.importedSymbols).toEqual(['FlexLayoutModule']);
+    expect(footprint.files).toEqual(['src/app/app.module.ts', 'src/app/header.component.ts']);
+    expect(footprint.templateOccurrences).toBe(3);
+  });
 });
 

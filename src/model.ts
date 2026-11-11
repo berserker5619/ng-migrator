@@ -71,7 +71,7 @@ export interface HeldBack {
   reason: string;
 }
 
-export type BlockerReason = 'no-compatible-version' | 'deprecated' | 'peer-conflict' | 'ivy-or-ngcc' | 'unknown';
+export type BlockerReason = 'no-compatible-version' | 'deprecated' | 'unmaintained' | 'peer-conflict' | 'ivy-or-ngcc' | 'unknown';
 
 export interface Blocker {
   package: string;
@@ -82,7 +82,10 @@ export interface Blocker {
   current?: string;
   /** Newest release that supported the previous major, if known. */
   lastCompatible?: string;
-  recommendation?: 'upgrade' | 'alternate' | 'fork' | 'inline' | 'manual';
+  evidence?: 'declared' | 'verified';
+  unmaintained?: boolean;
+  riskNote?: string;
+  recommendation?: 'upgrade' | 'alternate' | 'fork' | 'inline' | 'remove' | 'manual';
   recommendedFix?: string;
   source?: 'analysis' | 'rule';
   confidence?: 'high' | 'medium' | 'low';

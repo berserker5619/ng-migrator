@@ -21,15 +21,20 @@ function io(overrides: Partial<CliIo> = {}) {
 describe('cli', () => {
   it('prints the version', async () => {
     const t = io();
+    expect(TOOL_VERSION).toBe('0.1.0');
     expect(await runCli(['--version'], t.value)).toBe(ExitCode.Success);
-    expect(t.out().trim()).toBe(TOOL_VERSION);
+    expect(t.out().trim()).toBe('0.1.0');
   });
 
-  it('lists the 1.0 commands in help', async () => {
+  it('lists the 1.0 commands in help and rejects migrate', async () => {
     const t = io();
     expect(await runCli(['--help'], t.value)).toBe(ExitCode.Success);
     for (const cmd of ['doctor', 'analyze', 'plan', 'status', 'approve']) expect(t.out()).toContain(cmd);
     expect(t.out()).not.toContain('migrate');
+
+    const m = io();
+    expect(await runCli(['migrate'], m.value)).toBe(ExitCode.Usage);
+    expect(m.err()).toContain('NGM-2001');
   });
 
   it('exits 2 on an unknown flag', async () => {
