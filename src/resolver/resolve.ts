@@ -14,7 +14,7 @@ import {
   type Packument,
   type RegistryClient,
 } from '../registry/client.js';
-import { preserveRangeStyle, satisfiesAngularPeer } from './range.js';
+import { preserveRangeStyle, safeMinVersion, satisfiesAngularPeer } from './range.js';
 
 export interface ResolveStepOptions {
   project: ProjectInfo;
@@ -291,7 +291,7 @@ export async function resolveStepDependencies(
       const meta = pack.versions[v];
       const peer = meta?.peerDependencies?.['@angular/core'];
       if (peer) {
-        const minV = semver.minVersion(peer);
+        const minV = safeMinVersion(peer);
         if (minV && minV.major > targetMajor) {
           heldBack.push({
             name: dep.name,
@@ -319,7 +319,7 @@ export async function resolveStepDependencies(
 
     if (targetVersion) {
       const meta = pack.versions[targetVersion];
-      const currentVersion = dep.installed ?? semver.minVersion(dep.declared)?.version;
+      const currentVersion = dep.installed ?? safeMinVersion(dep.declared)?.version;
       const isDeprecated = Boolean(meta?.deprecated);
       const isUnmaint = isPackageUnmaintained(pack, targetVersion, rule, unmaintainedThresholdMonths, effectiveNow, targetMajor);
 

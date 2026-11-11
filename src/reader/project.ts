@@ -7,6 +7,7 @@ import { pathExists, readJsonIfExists } from '../platform/fs.js';
 import { compareOrdinal } from '../platform/paths.js';
 import exceptions from '../rules/angular-exceptions.json' with { type: 'json' };
 import type { DependencyInfo, DependencyType, ProjectInfo, ProjectStyle, WorkspaceType } from '../model.js';
+import { safeMinVersion } from '../resolver/range.js';
 import { walkProject } from './files.js';
 
 interface PackageJson {
@@ -245,7 +246,7 @@ export async function readProject(root: string): Promise<ProjectInfo> {
     .sort((a, b) => compareOrdinal(a.name, b.name));
 
   const core = dependencies.find((d) => d.name === '@angular/core');
-  const coreVersion = core?.installed ?? (core ? semver.minVersion(core.declared)?.version : undefined);
+  const coreVersion = core?.installed ?? (core ? safeMinVersion(core.declared)?.version : undefined);
   const angular = {
     ...(core ? { declared: core.declared } : {}),
     ...(core?.installed ? { installed: core.installed } : {}),

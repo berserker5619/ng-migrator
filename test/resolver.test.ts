@@ -8,7 +8,7 @@ import { createPlan } from '../src/planner/plan.js';
 import { readProject } from '../src/reader/project.js';
 import { RegistryClient, type Packument } from '../src/registry/client.js';
 import { loadNpmrc } from '../src/registry/npmrc.js';
-import { preserveRangeStyle, satisfiesAngularPeer } from '../src/resolver/range.js';
+import { normalizeRange, preserveRangeStyle, safeMinVersion, satisfiesAngularPeer } from '../src/resolver/range.js';
 import { resolveStepDependencies } from '../src/resolver/resolve.js';
 import {
   detectYarnLockfileFlavor,
@@ -35,6 +35,17 @@ describe('satisfiesAngularPeer', () => {
     expect(satisfiesAngularPeer({ '@angular/core': '^15.0.0' }, '16.2.0', 16)).toBe(false);
     expect(satisfiesAngularPeer({ '@angular/core': '^15.0.0 || ^16.0.0' }, '16.2.0', 16)).toBe(true);
     expect(satisfiesAngularPeer(undefined, '16.2.0', 16)).toBe(true);
+  });
+
+  it('handles malformed real-world ranges without throwing', () => {
+    // Real-world @swimlane/ngx-charts 11.0.0 declares "7.x | 8.x" with a single pipe
+    expect(normalizeRange('7.x | 8.x')).toBe('7.x || 8.x');
+    expect(satisfiesAngularPeer({ '@angular/core': '7.x | 8.x' }, '8.2.0', 8)).toBe(true);
+    expect(satisfiesAngularPeer({ '@angular/core': '7.x | 8.x' }, '16.2.0', 16)).toBe(false);
+    // Completely invalid semver range does not throw
+    expect(satisfiesAngularPeer({ '@angular/core': 'not-a-valid-semver-range' }, '16.2.0', 16)).toBe(false);
+    expect(safeMinVersion('not-a-valid-semver-range')).toBeNull();
+    expect(safeMinVersion('7.x | 8.x')?.version).toBe('7.0.0');
   });
 });
 
