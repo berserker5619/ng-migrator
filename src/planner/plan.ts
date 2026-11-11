@@ -40,6 +40,7 @@ export async function createPlan(options: PlanOptions): Promise<Plan> {
 
   const steps: PlannedStep[] = [];
   const numSteps = targetMajor - currentMajor;
+  const removedAtStep = new Map<string, number>();
 
   for (let i = 0; i < numSteps; i++) {
     const fromMajor = currentMajor + i;
@@ -145,6 +146,27 @@ export async function createPlan(options: PlanOptions): Promise<Plan> {
       }
     }
 
+    // If a package had a "remove" recommendation at an earlier step n, do not repeat it as a blocker
+    // at later steps; instead record that this step depends on the decision at step n.
+    const dependsOnDecisions: Array<{ package: string; stepIndex: number }> = [];
+    if (removedAtStep.size > 0) {
+      for (const b of stepResolution.blockers) {
+        const originStep = removedAtStep.get(b.package);
+        if (originStep !== undefined) {
+          dependsOnDecisions.push({ package: b.package, stepIndex: originStep });
+        }
+      }
+      stepResolution.blockers = stepResolution.blockers.filter((b) => !removedAtStep.has(b.package));
+      stepResolution.changes = stepResolution.changes.filter((c) => !removedAtStep.has(c.name));
+      stepResolution.heldBack = stepResolution.heldBack.filter((h) => !removedAtStep.has(h.name));
+    }
+
+    for (const b of stepResolution.blockers) {
+      if (b.recommendation === 'remove' && !removedAtStep.has(b.package)) {
+        removedAtStep.set(b.package, i + 1);
+      }
+    }
+
     const actions: string[] = [];
     if (samePatch) {
       actions.push(`Update to latest patch release of current major (Angular ${samePatch})`);
@@ -164,6 +186,9 @@ export async function createPlan(options: PlanOptions): Promise<Plan> {
         risks.push(b.riskNote);
       }
     }
+    for (const d of dependsOnDecisions) {
+      risks.push(`${d.package}: depends on the decision at step ${d.stepIndex}.`);
+    }
     if (resolutionCheck.status === 'conflict') {
       risks.push('Package manager reported peer dependency conflicts during resolution check.');
     }
@@ -179,6 +204,7 @@ export async function createPlan(options: PlanOptions): Promise<Plan> {
       unchanged: stepResolution.unchanged,
       heldBack: stepResolution.heldBack,
       blockers: stepResolution.blockers,
+      ...(dependsOnDecisions.length > 0 ? { dependsOnDecisions } : {}),
       resolution: resolutionCheck,
       actions,
       risks,

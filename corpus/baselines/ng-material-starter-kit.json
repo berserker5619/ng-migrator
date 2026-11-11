@@ -33,18 +33,11 @@
       "step": 2,
       "from": 15,
       "to": 16,
-      "expectedBlockers": [
+      "expectedBlockers": [],
+      "dependsOnDecisions": [
         {
           "package": "@angular/flex-layout",
-          "dependencyKind": "runtime",
-          "reason": "deprecated",
-          "hard": false,
-          "evidence": "declared compatible",
-          "unmaintained": true,
-          "expectedRecommendation": "remove",
-          "recommendedFix": "remove the unused dependency",
-          "confidence": "high",
-          "runnerUp": "CSS flexbox/grid, Tailwind CSS"
+          "stepIndex": 1
         }
       ]
     }

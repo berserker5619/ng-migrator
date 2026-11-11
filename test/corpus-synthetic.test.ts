@@ -375,6 +375,12 @@ describe('synthetic corpus fixtures', () => {
     expect(blocker?.runnerUp).toBe('CSS flexbox/grid, Tailwind CSS');
     expect(blocker?.usage?.filesCount).toBe(0);
     expect(blocker?.usage?.templateUsages).toBe(0);
+
+    // Step 2 (15 -> 16): because @angular/flex-layout had a "remove" recommendation at step 1,
+    // it must not be repeated as a blocker at step 2 and must be marked "depends on the decision at step 1"
+    const step2 = plan.steps[1]!;
+    expect(step2.blockers.find((b) => b.package === '@angular/flex-layout')).toBeUndefined();
+    expect(step2.dependsOnDecisions).toEqual([{ package: '@angular/flex-layout', stepIndex: 1 }]);
   });
 
   it('enforces corpus baseline license hygiene: unknown licenses are local-only and excluded from CI/nightly', async () => {

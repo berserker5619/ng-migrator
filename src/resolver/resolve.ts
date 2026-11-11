@@ -323,6 +323,32 @@ export async function resolveStepDependencies(
       const isDeprecated = Boolean(meta?.deprecated);
       const isUnmaint = isPackageUnmaintained(pack, targetVersion, rule, unmaintainedThresholdMonths, effectiveNow, targetMajor);
 
+      const newerWithoutAngularPeer = hasAngularPeer
+        ? allReleases.filter((v) => {
+            if (!semver.gt(v, targetVersion)) return false;
+            const m = pack.versions[v];
+            return (
+              m?.peerDependencies?.['@angular/core'] === undefined &&
+              m?.peerDependencies?.['@angular/common'] === undefined
+            );
+          })
+        : [];
+
+      let chosenVersionReason: string | undefined;
+      let heldRangeLabel: string | undefined;
+      if (newerWithoutAngularPeer.length > 0) {
+        const oldestHeldBack = newerWithoutAngularPeer[newerWithoutAngularPeer.length - 1]!;
+        const newestHeldBack = newerWithoutAngularPeer[0]!;
+        heldRangeLabel =
+          oldestHeldBack === newestHeldBack ? newestHeldBack : `${oldestHeldBack} to ${newestHeldBack}`;
+        chosenVersionReason = `held back from ${heldRangeLabel} because those newer releases declare no Angular peer range; chose ${targetVersion} as the highest release declaring an @angular/* peer range supporting Angular ${targetMajor}`;
+        heldBack.push({
+          name: dep.name,
+          version: heldRangeLabel,
+          reason: `Newer release(s) (${heldRangeLabel}) declare no Angular peer range; chose ${targetVersion} as highest release declaring an @angular/* peer range (${meta?.peerDependencies?.['@angular/core'] ?? meta?.peerDependencies?.['@angular/common'] ?? 'compatible'})`,
+        });
+      }
+
       if (currentVersion && semver.eq(currentVersion, targetVersion) && !isDeprecated && !isUnmaint) {
         unchanged.push(dep.name);
       } else {
@@ -333,7 +359,9 @@ export async function resolveStepDependencies(
           currentSpec: dep.declared,
           target: targetVersion,
           targetSpec: preserveRangeStyle(targetVersion, dep.declared),
-          reason: `Peer range supports Angular ${targetMajor}`,
+          reason: heldRangeLabel
+            ? `Peer range supports Angular ${targetMajor} (chose ${targetVersion}; ${heldRangeLabel} held back with no Angular peer range)`
+            : `Peer range supports Angular ${targetMajor}`,
           evidence: 'declared',
           deprecated: meta?.deprecated,
           unmaintained: isUnmaint,
@@ -357,6 +385,7 @@ export async function resolveStepDependencies(
           riskNote,
           details: meta?.deprecated ?? `Package ${dep.name} is ${reason}.`,
           current: dep.installed ?? dep.declared,
+          ...(chosenVersionReason ? { chosenVersion: targetVersion, chosenVersionReason } : {}),
         });
       }
     } else {

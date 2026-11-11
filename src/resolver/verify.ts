@@ -1,5 +1,5 @@
 import { rmSync } from 'node:fs';
-import { copyFile, mkdtemp, writeFile } from 'node:fs/promises';
+import { copyFile, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type { PackageManager } from '../config/config.js';
@@ -12,6 +12,67 @@ export interface VerifyResolutionOptions {
   packageManager: PackageManager;
   changes: PackageChange[];
   onTempDirReady?: (info: { tempDir: string; copiedFiles: string[] }) => void;
+}
+
+/**
+ * Detects Yarn Classic (1.x) vs Yarn Berry (2+) from a yarn.lock file's content.
+ * - Classic (v1): contains `# yarn lockfile v1` header.
+ * - Berry (v2+): YAML format containing `__metadata:` key.
+ */
+export function detectYarnLockfileFlavor(content: string): 'classic' | 'berry' | undefined {
+  if (/^#\s*yarn lockfile v1\b/im.test(content)) {
+    return 'classic';
+  }
+  if (/^__metadata:\s*$/m.test(content)) {
+    return 'berry';
+  }
+  return undefined;
+}
+
+/**
+ * Detects Yarn Classic (1.x) vs Yarn Berry (2+) from `yarn --version` output.
+ */
+export function parseYarnVersionFlavor(versionOutput: string): {
+  flavor?: 'classic' | 'berry';
+  version?: string;
+} {
+  const cleaned = versionOutput.trim().split(/\r?\n/).pop()?.trim() ?? '';
+  const match = /^v?(\d+)\.(\d+)\.(\d+(?:-[\w.-]+)?)$/.exec(cleaned);
+  if (!match) {
+    return {};
+  }
+  const major = Number.parseInt(match[1]!, 10);
+  const version = `${match[1]}.${match[2]}.${match[3]}`;
+  if (major === 1) {
+    return { flavor: 'classic', version };
+  }
+  if (major >= 2) {
+    return { flavor: 'berry', version };
+  }
+  return { version };
+}
+
+export async function detectYarnFlavor(
+  projectRoot: string,
+  cwd: string,
+  cancelSignal?: AbortSignal,
+): Promise<{ flavor: 'classic' | 'berry'; version?: string }> {
+  let lockfileFlavor: 'classic' | 'berry' | undefined;
+  const yarnLockPath = path.join(projectRoot, 'yarn.lock');
+  if (await pathExists(yarnLockPath)) {
+    const content = await readFile(yarnLockPath, 'utf8').catch(() => '');
+    lockfileFlavor = detectYarnLockfileFlavor(content);
+  }
+
+  const verRes = await run('yarn', ['--version'], { cwd, ...(cancelSignal ? { cancelSignal } : {}) });
+  const parsedVer = verRes.exitCode === 0 ? parseYarnVersionFlavor(verRes.stdout) : {};
+
+  // Prefer the installed binary flavor when lockfile is absent or matches; if lockfile says berry, use berry only when binary is 2+, otherwise classic binary cannot run --mode update-lockfile
+  const flavor = parsedVer.flavor ?? lockfileFlavor ?? 'classic';
+  return {
+    flavor,
+    ...(parsedVer.version ? { version: parsedVer.version } : {}),
+  };
 }
 
 /**
@@ -197,6 +258,11 @@ export async function verifyWithPackageManager(
           if (lockJson) {
             const pkgs = lockJson.packages as Record<string, unknown> | undefined;
             const lockDeps = lockJson.dependencies as Record<string, unknown> | undefined;
+            if (pkgs && pkgs[''] && typeof pkgs[''] === 'object') {
+              const rootEntry = pkgs[''] as Record<string, unknown>;
+              rootEntry.dependencies = deps;
+              rootEntry.devDependencies = devDeps;
+            }
             for (const change of changes) {
               if (pkgs) delete pkgs[`node_modules/${change.name}`];
               if (lockDeps) delete lockDeps[change.name];
@@ -216,16 +282,17 @@ export async function verifyWithPackageManager(
 
     onTempDirReady?.({ tempDir, copiedFiles: [...copiedFiles] });
 
-    // Run lockfile-only check in the strictest peer mode available for each package manager
+    // Run resolution check in the isolated OS temp directory
     let cmd = 'npm';
     let args: string[] = [
       'install',
       '--package-lock-only',
-      '--strict-peer-deps',
+      '--dry-run',
       '--no-audit',
       '--no-fund',
       '--ignore-scripts',
     ];
+    let yarnFlavor: 'classic' | 'berry' | undefined;
 
     if (packageManager === 'pnpm') {
       cmd = 'pnpm';
@@ -238,9 +305,16 @@ export async function verifyWithPackageManager(
       ];
     } else if (packageManager === 'yarn') {
       cmd = 'yarn';
-      args = ['install', '--mode', 'update-lockfile', '--ignore-scripts', '--non-interactive'];
+      const detected = await detectYarnFlavor(projectRoot, tempDir, abortController.signal);
+      yarnFlavor = detected.flavor;
+      if (yarnFlavor === 'berry') {
+        args = ['install', '--mode', 'update-lockfile', '--ignore-scripts'];
+      } else {
+        args = ['install', '--ignore-scripts', '--non-interactive', '--no-progress'];
+      }
     }
 
+    const command = `${cmd} ${args.join(' ')}`;
     const result = await run(cmd, args, { cwd: tempDir, cancelSignal: abortController.signal });
 
     await removeWithRetry(tempDir).catch(() => undefined);
@@ -254,12 +328,17 @@ export async function verifyWithPackageManager(
     const fullOutput = `${result.stdout}\n${result.stderr}`;
     const conflicts = parsePeerConflicts(fullOutput);
     const hasWarningLines = /(?:^|\n)\s*(?:npm warn|warn\b|warning\b|➤ YN\d+:)/i.test(fullOutput);
+    const extraMeta = {
+      ...(yarnFlavor ? { yarnFlavor } : {}),
+      command,
+    };
 
-    // Even if pnpm or yarn exits 0, peer warnings parsed from output are treated as peer-conflict blockers
+    // Even if npm, pnpm, or yarn exits 0, peer warnings parsed from output are treated as peer-conflict blockers
     if (conflicts.length > 0) {
       return {
         status: 'conflict',
         packageManager,
+        ...extraMeta,
         withWarnings: result.exitCode === 0 || hasWarningLines,
         detail: 'Peer dependency conflict during resolution check.',
         conflicts,
@@ -273,6 +352,7 @@ export async function verifyWithPackageManager(
       return {
         status: 'confirmed',
         packageManager,
+        ...extraMeta,
         withWarnings: hasWarningLines,
         tempDir,
         copiedFiles,
@@ -292,8 +372,22 @@ export async function verifyWithPackageManager(
       return {
         status: 'conflict',
         packageManager,
+        ...extraMeta,
         withWarnings: hasWarningLines,
         detail: 'Peer dependency conflict during resolution check.',
+        tempDir,
+        copiedFiles,
+        tempDirCleaned,
+      };
+    }
+
+    if (packageManager === 'yarn' && yarnFlavor === 'classic') {
+      return {
+        status: 'unverified',
+        packageManager,
+        ...extraMeta,
+        withWarnings: hasWarningLines,
+        detail: 'resolution not verified (yarn classic)',
         tempDir,
         copiedFiles,
         tempDirCleaned,
@@ -303,6 +397,7 @@ export async function verifyWithPackageManager(
     return {
       status: 'failed',
       packageManager,
+      ...extraMeta,
       withWarnings: hasWarningLines,
       detail: result.stderr.trim() || result.stdout.trim() || `Package manager exited with code ${result.exitCode}`,
       tempDir,

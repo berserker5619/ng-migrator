@@ -84,6 +84,10 @@ export interface Blocker {
   current?: string;
   /** Newest release that supported the previous major, if known. */
   lastCompatible?: string;
+  /** Chosen target version when newer releases were held back (e.g. missing Angular peer range). */
+  chosenVersion?: string;
+  /** Reason why chosenVersion was selected over newer releases. */
+  chosenVersionReason?: string;
   evidence?: 'declared' | 'verified';
   unmaintained?: boolean;
   riskNote?: string;
@@ -111,8 +115,10 @@ export interface PeerConflict {
 }
 
 export interface ResolutionCheck {
-  status: 'confirmed' | 'conflict' | 'skipped' | 'failed';
+  status: 'confirmed' | 'conflict' | 'skipped' | 'failed' | 'unverified';
   packageManager?: PackageManager;
+  yarnFlavor?: 'classic' | 'berry';
+  command?: string;
   withWarnings?: boolean;
   warnings?: string[];
   detail?: string;
@@ -134,6 +140,8 @@ export interface PlannedStep {
   unchanged: string[];
   heldBack: HeldBack[];
   blockers: Blocker[];
+  /** Packages recommended for removal at an earlier step that depend on that step's decision. */
+  dependsOnDecisions?: Array<{ package: string; stepIndex: number }>;
   resolution: ResolutionCheck;
   actions: string[];
   risks: string[];

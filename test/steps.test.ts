@@ -242,4 +242,63 @@ Legacy note
     expect(extracted.decisions[stableId]).toBe(true);
     expect(extracted.reviewerNotes).toBe('Legacy note');
   });
+
+  it('renders held-back chosenVersion explanation and deduplicated prior-step remove decisions', () => {
+    const step1WithHeldBack: PlannedStep = {
+      ...sampleStep,
+      index: 1,
+      from: 12,
+      to: 13,
+      heldBack: [
+        {
+          name: 'ngx-logger',
+          version: '5.0.4 to 5.0.12',
+          reason: 'no Angular peer range declared in 5.0.4 to 5.0.12; held at 5.0.3 (declares @angular/core >=11.0.0)',
+        },
+      ],
+      blockers: [
+        {
+          package: 'ngx-logger',
+          dependencyKind: 'runtime',
+          reason: 'unmaintained',
+          evidence: 'declared',
+          hard: false,
+          unmaintained: true,
+          chosenVersion: '5.0.3',
+          chosenVersionReason:
+            'held back: newer releases (5.0.4 to 5.0.12) declare no Angular peer range; 5.0.3 is the highest release that explicitly declares Angular peer compatibility (@angular/core >=11.0.0)',
+          details: 'ngx-logger is compatible with Angular 13 (declared compatible via 5.0.3)',
+        },
+      ],
+    };
+
+    const doc1 = formatStepDocument(step1WithHeldBack);
+    expect(doc1).toContain('## Held-back packages');
+    expect(doc1).toContain('| ngx-logger | 5.0.4 to 5.0.12 | no Angular peer range declared in 5.0.4 to 5.0.12; held at 5.0.3 (declares @angular/core >=11.0.0) |');
+    expect(doc1).toContain(
+      '- Chosen version: 5.0.3 (held back: newer releases (5.0.4 to 5.0.12) declare no Angular peer range; 5.0.3 is the highest release that explicitly declares Angular peer compatibility (@angular/core >=11.0.0))',
+    );
+
+    const step2DependingOnStep1: PlannedStep = {
+      ...sampleStep,
+      index: 2,
+      from: 15,
+      to: 16,
+      provisional: true,
+      blockers: [],
+      dependsOnDecisions: [{ package: '@angular/flex-layout', stepIndex: 1 }],
+      resolution: {
+        status: 'unverified',
+        packageManager: 'yarn',
+        yarnFlavor: 'classic',
+        detail: 'resolution not verified (yarn classic)',
+      },
+    };
+
+    const doc2 = formatStepDocument(step2DependingOnStep1);
+    expect(doc2).toContain('Resolution check: resolution not verified (yarn classic).');
+    expect(doc2).toContain('## Blockers\nNone detected for this step.\n- @angular/flex-layout: depends on the decision at step 1');
+    expect(doc2).not.toContain('### @angular/flex-layout');
+    expect(doc2).toContain('- @angular/flex-layout: depends on the decision at step 1');
+  });
 });

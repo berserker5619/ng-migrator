@@ -104,9 +104,9 @@ Every error reported by `ng-migrator` includes a stable identifier (`NGM-XXXX`) 
 
 ## NGM-6001: Unsupported Node version
 
-- **What happened:** The Node.js runtime executing `ng-migrator` does not satisfy the required engine range (`>=18.19`).
-- **Why:** `ng-migrator` requires Node `>=18.19` for its own CLI process.
-- **What to do next:** Switch to Node 18.19+ (for example via `fnm`, `nvm`, or `volta`) to run `ng-migrator`. If your Angular project itself needs an older Node version for its toolchain, configure `commandPrefix` in `ng-migrator.config.json`.
+- **What happened:** The Node.js runtime executing `ng-migrator` does not satisfy the required engine range (`>=22`).
+- **Why:** Node 18 and 20 are end of life; `ng-migrator` requires Node `>=22` (supported lines: Node 22, 24, and 26) for its own CLI process.
+- **What to do next:** Switch to Node 22, 24, or 26 (for example via `fnm`, `nvm`, or `volta`) to run `ng-migrator`. If your Angular project itself needs an older Node version for its toolchain, configure `commandPrefix` in `ng-migrator.config.json`.
 
 ## NGM-6002: Blocked subprocess
 

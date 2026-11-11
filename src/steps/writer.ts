@@ -85,12 +85,18 @@ export function formatStepDocument(
     }
   }
   lines.push('');
-  const pmName = step.resolution.packageManager ?? 'npm';
+  const rawPm = step.resolution.packageManager ?? 'npm';
+  const pmName =
+    rawPm === 'yarn' && step.resolution.yarnFlavor
+      ? `yarn (${step.resolution.yarnFlavor})`
+      : rawPm;
   const warningsLabel = step.resolution.withWarnings ? 'with warnings' : 'without warnings';
   if (step.resolution.status === 'confirmed') {
     lines.push(`Resolution check: confirmed by ${pmName} (${warningsLabel}).`);
   } else if (step.resolution.status === 'conflict') {
     lines.push(`Resolution check: ${pmName} reported peer dependency conflicts (${warningsLabel}).`);
+  } else if (step.resolution.status === 'unverified') {
+    lines.push(`Resolution check: ${step.resolution.detail ?? `resolution not verified (${pmName})`}.`);
   } else if (step.resolution.status === 'skipped') {
     lines.push(`Resolution check: skipped (${step.provisional ? 'provisional step' : 'offline mode'}, package manager: ${pmName}).`);
   } else if (step.resolution.status === 'failed') {
@@ -99,7 +105,7 @@ export function formatStepDocument(
   lines.push('');
 
   if (step.heldBack.length > 0) {
-    lines.push('## Held-back packages (need later Angular versions)');
+    lines.push('## Held-back packages');
     lines.push('| Package | Candidate | Reason |');
     lines.push('|---|---|---|');
     for (const h of step.heldBack) {
@@ -109,9 +115,12 @@ export function formatStepDocument(
   }
 
   lines.push('## Blockers');
-  if (step.blockers.length === 0) {
+  if (step.blockers.length === 0 && (!step.dependsOnDecisions || step.dependsOnDecisions.length === 0)) {
     lines.push('None detected.');
   } else {
+    if (step.blockers.length === 0) {
+      lines.push('None detected for this step.');
+    }
     for (const b of step.blockers) {
       const typeLabel = b.hard ? '' : ' [soft / unmaintained]';
       lines.push(`### ${b.package} (${b.reason})${typeLabel}`);
@@ -119,6 +128,11 @@ export function formatStepDocument(
       if (b.evidence) {
         const evLabel = b.evidence === 'verified' ? 'verified by build' : 'declared compatible';
         lines.push(`- Evidence: ${evLabel}`);
+      }
+      if (b.chosenVersion) {
+        lines.push(
+          `- Chosen version: ${b.chosenVersion}${b.chosenVersionReason ? ` (${b.chosenVersionReason})` : ''}`,
+        );
       }
       if (b.recommendedFix) {
         lines.push(`- Recommended fix: ${b.recommendedFix}`);
@@ -158,6 +172,12 @@ export function formatStepDocument(
       }
       lines.push('');
     }
+    if (step.dependsOnDecisions && step.dependsOnDecisions.length > 0) {
+      for (const d of step.dependsOnDecisions) {
+        lines.push(`- ${d.package}: depends on the decision at step ${d.stepIndex}`);
+      }
+      lines.push('');
+    }
   }
   lines.push('');
 
@@ -190,6 +210,11 @@ export function formatStepDocument(
       const legacyId = `blocker-${b.package}`;
       const checked = (stepState?.decisions[stableId] ?? stepState?.decisions[legacyId]) ? 'x' : ' ';
       lines.push(`- [${checked}] Decide resolution for ${b.package} (${b.reason}) <!-- id: ${stableId} -->`);
+    }
+  }
+  if (step.dependsOnDecisions && step.dependsOnDecisions.length > 0) {
+    for (const d of step.dependsOnDecisions) {
+      lines.push(`- ${d.package}: depends on the decision at step ${d.stepIndex}`);
     }
   }
   lines.push('');

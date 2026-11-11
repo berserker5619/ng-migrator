@@ -1,5 +1,4 @@
-import { createHash } from 'node:crypto';
-import { readdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -10,36 +9,16 @@ import * as processMod from '../src/platform/process.js';
 import { readProject } from '../src/reader/project.js';
 import type { Packument, RegistryClient } from '../src/registry/client.js';
 import { verifyWithPackageManager } from '../src/resolver/verify.js';
-import { tempProject } from './helpers.js';
+import { auditProjectFiles, tempProject } from './helpers.js';
 
 let dir: string;
 let cleanup: () => Promise<void>;
 beforeEach(async () => ({ dir, cleanup } = await tempProject()));
 afterEach(async () => cleanup());
 
-async function hashDirectoryFiles(
-  baseDir: string,
-  ignoreDirs: Set<string> = new Set(['.ng-migrator', 'node_modules', '.git']),
-): Promise<Record<string, string>> {
-  const result: Record<string, string> = {};
-
-  async function walk(current: string) {
-    const entries = await readdir(current, { withFileTypes: true });
-    for (const entry of entries) {
-      if (entry.isDirectory()) {
-        if (ignoreDirs.has(entry.name)) continue;
-        await walk(path.join(current, entry.name));
-      } else if (entry.isFile()) {
-        const fullPath = path.join(current, entry.name);
-        const rel = path.relative(baseDir, fullPath).replace(/\\/g, '/');
-        const content = await readFile(fullPath);
-        result[rel] = createHash('sha256').update(content).digest('hex');
-      }
-    }
-  }
-
-  await walk(baseDir);
-  return result;
+async function hashDirectoryFiles(baseDir: string): Promise<Record<string, string>> {
+  const snap = await auditProjectFiles(baseDir);
+  return snap.workingTreeHashes;
 }
 
 describe('Safety audit: non-destructive planning guarantees', () => {
@@ -186,6 +165,23 @@ describe('Safety audit: non-destructive planning guarantees', () => {
     } finally {
       runSpy.mockRestore();
     }
+  });
+
+  it('tracks working-tree files and .git/ files separately with stable counts', async () => {
+    await writeFile(path.join(dir, 'package.json'), '{"name":"git-scope-test"}\n');
+    await writeFile(path.join(dir, 'README.md'), '# hello\n');
+    await mkdir(path.join(dir, '.git', 'refs', 'heads'), { recursive: true });
+    await writeFile(path.join(dir, '.git', 'HEAD'), 'ref: refs/heads/main\n');
+    await writeFile(path.join(dir, '.git', 'refs', 'heads', 'main'), '0123456789abcdef\n');
+    await mkdir(path.join(dir, '.ng-migrator'), { recursive: true });
+    await writeFile(path.join(dir, '.ng-migrator', 'state.json'), '{}\n');
+
+    const snap = await auditProjectFiles(dir);
+    expect(snap.workingTreeCount).toBe(2);
+    expect(snap.gitDirCount).toBe(2);
+    expect(snap.totalOutsideMigratorCount).toBe(4);
+    expect(Object.keys(snap.workingTreeHashes).sort()).toEqual(['README.md', 'package.json']);
+    expect(Object.keys(snap.gitDirHashes).sort()).toEqual(['.git/HEAD', '.git/refs/heads/main']);
   });
 });
 

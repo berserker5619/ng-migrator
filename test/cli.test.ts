@@ -60,12 +60,14 @@ describe('cli', () => {
     expect(await runCli(['approve', 'two'], t.value)).toBe(ExitCode.Usage);
   });
 
-  it('exits 6 on an unsupported Node version and allows Node 18, 20, and 22', async () => {
-    const t = io({ nodeVersion: '18.10.0' });
-    expect(await runCli(['status'], t.value)).toBe(ExitCode.Environment);
-    expect(t.err()).toContain('NGM-6001');
+  it('exits 6 on EOL Node versions (18, 20) and allows supported Node lines (22, 24, 26)', async () => {
+    for (const eol of ['18.20.4', '20.18.0']) {
+      const t = io({ nodeVersion: eol });
+      expect(await runCli(['status'], t.value)).toBe(ExitCode.Environment);
+      expect(t.err()).toContain('NGM-6001');
+    }
 
-    for (const v of ['18.20.4', '20.18.0', '22.12.0']) {
+    for (const v of ['22.12.0', '24.0.0', '26.0.0']) {
       const ok = io({ nodeVersion: v });
       expect(await runCli(['--version'], ok.value)).toBe(ExitCode.Success);
     }

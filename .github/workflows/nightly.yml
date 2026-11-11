@@ -15,8 +15,8 @@ jobs:
     outputs:
       matrix: ${{ steps.filter.outputs.matrix }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v5.0.0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: 24
       - id: filter
@@ -42,8 +42,8 @@ jobs:
       matrix:
         entry: ${{ fromJson(needs.discover.outputs.matrix) }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v5.0.0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: 24
           cache: npm

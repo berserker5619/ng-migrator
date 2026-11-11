@@ -1,8 +1,8 @@
 # Rule Authoring Guide
 
-`ng-migrator` includes a recommendation engine that dynamically computes migration strategies for third-party dependencies based on codebase footprint and package complexity.
+`ng-migrator` includes a recommendation engine that dynamically computes migration strategies for third-party dependencies based on codebase usage footprint and package metadata.
 
-Rules allow teams and community contributors to provide explicit overrides, recommendations, and guidance for specific packages.
+Rules allow teams and community contributors to flag packages that stopped releasing after a given Angular major (`lastReleaseFor`) and provide curated recommendations, alternatives, and guidance. A rule never overrides peer-range compatibility evidence or turns a declared-compatible package into a hard blocker.
 
 ---
 
@@ -15,7 +15,7 @@ A rule file is a JSON document containing an array of rule objects (or an object
   {
     "package": "@angular/flex-layout",
     "status": "deprecated",
-    "appliesFrom": 15,
+    "lastReleaseFor": 15,
     "category": "layout",
     "recommendation": "alternate",
     "alternatives": ["CSS flexbox/grid", "Tailwind CSS"],
@@ -30,10 +30,10 @@ A rule file is a JSON document containing an array of rule objects (or an object
 |---|---|---|
 | `package` | `string` | The exact npm package name (required). |
 | `status` | `'deprecated' \| 'abandoned' \| 'maintained'` | Maintenance status of the package. |
-| `appliesFrom` | `number` | Angular major version from which this rule applies (e.g. `15`). |
-| `category` | `string` | Domain category: `'layout'`, `'ui'`, `'utility'`, `'auth'`, `'crypto'`, `'sdk'`, etc. |
+| `lastReleaseFor` | `number` | The final Angular major version for which this package published a dedicated release (e.g. `15`). Flags the package as unmaintained without overriding peer-range evidence. |
+| `category` | `string` | Domain category: `'layout'`, `'ui'`, `'utility'`, `'tooling'`, `'auth'`, `'crypto'`, `'sdk'`, etc. |
 | `recommendation` | `'upgrade' \| 'alternate' \| 'fork' \| 'inline' \| 'manual'` | Recommended action from the resolution ladder. |
-| `alternatives` | `string[]` | List of alternate packages or architectural replacements. |
+| `alternatives` | `string[]` | Ordered list of alternate packages, tooling migrations, or architectural replacements. |
 | `fork` | `string` | Recommended community fork supporting modern Angular versions. |
 | `notes` | `string` | Context and guidance displayed in step documents. |
 
@@ -71,26 +71,25 @@ For small utilities with simple logic (like clipboard or tooltip directives), re
 {
   "package": "ngx-clipboard",
   "status": "abandoned",
-  "appliesFrom": 16,
+  "lastReleaseFor": 15,
   "category": "utility",
   "recommendation": "inline",
   "notes": "Replace with Angular CDK Clipboard (CdkCopyToClipboard) or navigator.clipboard in a small custom directive."
 }
 ```
 
-### 2. Alternate Package Replacement
+### 2. Dev-Only Tooling Migration
 
-For complex dependencies where a healthy community alternative exists:
+For deprecated build/lint tooling (such as `codelyzer`), use `category: "tooling"` so the recommendation is described as a tooling migration rather than a runtime package swap:
 
 ```json
 {
-  "package": "ngx-popper",
+  "package": "codelyzer",
   "status": "deprecated",
-  "appliesFrom": 16,
-  "category": "ui",
+  "lastReleaseFor": 12,
+  "category": "tooling",
   "recommendation": "alternate",
-  "alternatives": ["@floating-ui/dom", "@angular/cdk/overlay"],
-  "notes": "ngx-popper is no longer maintained. Migrate to Floating UI or Angular CDK Overlay."
+  "alternatives": ["TSLint to ESLint via @angular-eslint", "eslint"],
+  "notes": "Codelyzer is a dev-only TSLint rule package with no releases past Angular 12; perform a tooling migration from TSLint to ESLint via @angular-eslint."
 }
 ```
-
