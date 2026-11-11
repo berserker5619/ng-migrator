@@ -33,7 +33,7 @@ jobs:
         run: |
           gh release create "${{ github.ref_name }}" \
             --title "Release ${{ github.ref_name }}" \
-            --generate-notes
+            --generate-notes || echo "Release already exists, continuing..."
         env:
           GH_TOKEN: ${{ github.token }}
 
