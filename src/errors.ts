@@ -48,6 +48,37 @@ export const ERRORS = {
 
 export type ErrorId = keyof typeof ERRORS;
 
+/**
+ * GitHub slugifies Markdown headings:
+ * 1. Convert to lower case
+ * 2. Remove punctuation (colons, commas, apostrophes, etc.) except hyphens and spaces
+ * 3. Replace spaces and whitespace sequences with a single hyphen
+ *
+ * Example: "NGM-1001: Unexpected internal error" -> "ngm-1001-unexpected-internal-error"
+ */
+export function githubHeadingSlug(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^\w\s-]/g, '')
+    .trim()
+    .replace(/\s+/g, '-');
+}
+
+/** Returns the exact GitHub anchor slug for an error heading in docs/troubleshooting.md. */
+export function getTroubleshootingSlug(errorId: ErrorId): string {
+  const spec = ERRORS[errorId];
+  const headingText = `${errorId}: ${spec.title}`;
+  return githubHeadingSlug(headingText);
+}
+
+export const TROUBLESHOOTING_BASE_URL =
+  'https://github.com/berserker5619/ng-migrator/blob/main/docs/troubleshooting.md';
+
+/** Returns the full hosted documentation link for an error ID. */
+export function getTroubleshootingUrl(errorId: ErrorId): string {
+  return `${TROUBLESHOOTING_BASE_URL}#${getTroubleshootingSlug(errorId)}`;
+}
+
 export class NgmError extends Error {
   readonly id: ErrorId;
   readonly exitCode: ExitCode;

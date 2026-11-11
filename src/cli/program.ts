@@ -8,7 +8,15 @@ import {
   resolveConfig,
   type PackageManager,
 } from '../config/config.js';
-import { ExitCode, NgmError, isNgmError } from '../errors.js';
+import {
+  ERRORS,
+  ExitCode,
+  NgmError,
+  TROUBLESHOOTING_BASE_URL,
+  getTroubleshootingUrl,
+  isNgmError,
+  type ErrorId,
+} from '../errors.js';
 import { isPortInUse } from '../platform/doctor.js';
 import { checkGitStatus } from '../platform/git.js';
 import { writeGeneratedText } from '../platform/text.js';
@@ -430,19 +438,19 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     if (err instanceof CommanderError) {
       if (err.exitCode === 0) return ExitCode.Success;
       output.error(`NGM-2001 ${err.message.replace(/^error:\s*/i, '')}`);
-      output.info('  Troubleshooting: https://github.com/berserker5619/ng-migrator/blob/main/docs/troubleshooting.md#ngm-2001');
+      output.info('  Troubleshooting: https://github.com/berserker5619/ng-migrator/blob/main/docs/troubleshooting.md#ngm-2001-invalid-command-line-usage');
       return ExitCode.Usage;
     }
     if (isNgmError(err)) {
       output.error(`${err.id} ${err.message}`);
       if (err.hint) output.info(`  ${err.hint}`);
-      const anchor = err.id.toLowerCase();
-      output.info(`  Troubleshooting: https://github.com/berserker5619/ng-migrator/blob/main/docs/troubleshooting.md#${anchor}`);
+      const link = err.id in ERRORS ? getTroubleshootingUrl(err.id as ErrorId) : `${TROUBLESHOOTING_BASE_URL}#${err.id.toLowerCase()}`;
+      output.info(`  Troubleshooting: ${link}`);
       return err.exitCode;
     }
     output.error(`NGM-1001 Unexpected error: ${err instanceof Error ? err.message : String(err)}`);
     if (err instanceof Error && err.stack) output.debug(err.stack);
-    output.info('  Troubleshooting: https://github.com/berserker5619/ng-migrator/blob/main/docs/troubleshooting.md#ngm-1001');
+    output.info('  Troubleshooting: https://github.com/berserker5619/ng-migrator/blob/main/docs/troubleshooting.md#ngm-1001-unexpected-internal-error');
     output.info('  Please report this with the output of --verbose.');
     return ExitCode.Unexpected;
   }

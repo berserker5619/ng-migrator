@@ -946,7 +946,9 @@ describe('Yarn Classic (1.x) vs Berry (2+) detection and verification', () => {
       expect(res.downloadEstimateMessage).toBeDefined();
       expect(notices).toHaveLength(1);
       expect(notices[0]).toContain('Yarn classic (1.x) has no lockfile-only mode');
-      expect(notices[0]).toContain('timeout 60s');
+      expect(notices[0]).toContain('Rough estimate');
+      expect(notices[0]).toContain('hundreds of MB');
+      expect(notices[0]).toContain('timeout: 60s');
       spy.mockRestore();
     } finally {
       await cleanup();

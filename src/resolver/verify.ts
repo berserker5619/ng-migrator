@@ -67,20 +67,24 @@ export function pruneYarnLockEntries(content: string, packageNames: readonly str
   return out.join('\n');
 }
 
+export function countYarnLockPackageEntries(content: string): number {
+  const matches = content.match(/^[^\s#][^:\n]*:/gm) ?? [];
+  return matches.filter((m) => !m.startsWith('__metadata')).length;
+}
+
 export function formatYarnClassicDownloadEstimate(
-  changedCount: number,
-  totalDirectDeps: number,
-  hasYarnLock: boolean,
+  packageCount: number,
+  source: 'lockfile' | 'manifest',
   timeoutMs: number,
 ): string {
-  const packagesToFetch = hasYarnLock ? Math.max(changedCount, 1) : Math.max(totalDirectDeps, changedCount, 1);
-  const approxMinMb = Math.max(5, Math.round(packagesToFetch * 1.5));
-  const approxMaxMb = Math.max(15, Math.round(packagesToFetch * 4));
+  // Rough estimate: typical npm packages average ~0.5 to 1.5 MB uncompressed/tarball with transitive deps.
+  // For Angular applications, full node_modules and transitive trees typically reach hundreds of MB.
   const timeoutSec = Math.round(timeoutMs / 1000);
-  const scopeNote = hasYarnLock
-    ? `copied yarn.lock and updating ${changedCount} changed package(s)`
-    : `installing ${totalDirectDeps} direct package(s)`;
-  return `Yarn classic (1.x) has no lockfile-only mode: running isolated install in temp directory with --ignore-scripts (${scopeNote}; estimated download ~${approxMinMb}-${approxMaxMb} MB if uncached, timeout ${timeoutSec}s).`;
+  const roughMb = Math.round(packageCount * 0.8);
+  const basis = source === 'lockfile'
+    ? `${packageCount} package(s) referenced in yarn.lock`
+    : `${packageCount} direct package(s) declared in package.json`;
+  return `Yarn classic (1.x) has no lockfile-only mode: running an isolated install in a temp directory with --ignore-scripts. Rough estimate: ~${roughMb} MB across ${basis} (uncached installs for an Angular application are typically hundreds of MB; timeout: ${timeoutSec}s).`;
 }
 
 /**
@@ -397,12 +401,20 @@ export async function verifyWithPackageManager(
         args = ['install', '--mode', 'update-lockfile', '--ignore-scripts'];
       } else {
         args = ['install', '--ignore-scripts', '--non-interactive', '--no-progress'];
-        const totalDirectDeps = Object.keys(deps).length + Object.keys(devDeps).length;
-        const hasYarnLock = copiedFiles.includes('yarn.lock');
+        let pkgCount = Object.keys(deps).length + Object.keys(devDeps).length;
+        let source: 'lockfile' | 'manifest' = 'manifest';
+        const yarnLockDest = path.join(tempDir, 'yarn.lock');
+        if (copiedFiles.includes('yarn.lock') && (await pathExists(yarnLockDest))) {
+          const lockContent = await readFile(yarnLockDest, 'utf8').catch(() => '');
+          const count = countYarnLockPackageEntries(lockContent);
+          if (count > 0) {
+            pkgCount = count;
+            source = 'lockfile';
+          }
+        }
         downloadEstimateMessage = formatYarnClassicDownloadEstimate(
-          changes.length,
-          totalDirectDeps,
-          hasYarnLock,
+          pkgCount,
+          source,
           timeoutMs,
         );
         onNotice?.(downloadEstimateMessage);

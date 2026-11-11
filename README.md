@@ -117,3 +117,10 @@ ng-migrator --project ./path/to/app --as-of 2026-11-01 plan --to 19
 - [Troubleshooting & Error Codes](https://github.com/berserker5619/ng-migrator/blob/main/docs/troubleshooting.md) ([local copy](docs/troubleshooting.md))
 - [Security Policy](SECURITY.md)
 - [Release Checklist](RELEASE_CHECKLIST.md)
+
+---
+
+## Troubleshooting and diagnostics
+
+- **Diagnostics & Error IDs:** Every failure surfaces a stable `NGM-XXXX` code linking directly to its heading on the [Troubleshooting Page](https://github.com/berserker5619/ng-migrator/blob/main/docs/troubleshooting.md).
+- **Stack Traces & Bundled Code:** `ng-migrator` ships as a compact, self-contained binary (`dist/cli.js`) without external source maps (`sourcemap: false`). Stack traces point into `dist/cli.js`. When diagnosing or reporting issues, always refer to the specific `NGM-*` error code, review the troubleshooting documentation, and capture full command diagnostics with `--verbose` and the run logs stored under `.ng-migrator/logs/`.
