@@ -37,10 +37,13 @@ export const ERRORS = {
   'NGM-3007': { exitCode: ExitCode.Precondition, title: 'Not an Angular project' },
   'NGM-3008': { exitCode: ExitCode.Precondition, title: 'Angular version not supported' },
   'NGM-4001': { exitCode: ExitCode.HardBlockers, title: 'Hard blockers found during analysis' },
+  'NGM-5001': { exitCode: ExitCode.VerificationFailed, title: 'Verification build, lint, or test failed' },
   'NGM-6001': { exitCode: ExitCode.Environment, title: 'Unsupported Node version' },
   'NGM-6002': { exitCode: ExitCode.Environment, title: 'Blocked subprocess' },
   'NGM-6003': { exitCode: ExitCode.Environment, title: 'Registry authentication failed' },
   'NGM-6004': { exitCode: ExitCode.Environment, title: 'Registry unreachable' },
+  'NGM-7001': { exitCode: ExitCode.Snapshot, title: 'Snapshot not found' },
+  'NGM-7002': { exitCode: ExitCode.Snapshot, title: 'Files modified after migration step' },
 } as const satisfies Record<string, ErrorSpec>;
 
 export type ErrorId = keyof typeof ERRORS;
