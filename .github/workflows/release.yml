@@ -1,12 +1,13 @@
 name: Release & Publish
 
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   id-token: write
 
 jobs:
@@ -14,12 +15,35 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
       - uses: actions/setup-node@v7
         with:
           node-version: 22
           registry-url: 'https://registry.npmjs.org'
-      - run: npm ci
-      - run: npm run check
-      - name: Publish package to npm via OIDC Trusted Publishing
-        run: npm publish --provenance --access public
 
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify build, lint, and tests
+        run: npm run check
+
+      - name: Create GitHub Release
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --title "Release ${{ github.ref_name }}" \
+            --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Publish package to npm
+        run: |
+          if [ -n "${{ secrets.NPM_TOKEN }}" ]; then
+            echo "Publishing via NPM_TOKEN..."
+            echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" >> ~/.npmrc
+            npm publish --access public
+          else
+            echo "Publishing via OIDC Trusted Publishing with provenance..."
+            npm publish --provenance --access public
+          fi
