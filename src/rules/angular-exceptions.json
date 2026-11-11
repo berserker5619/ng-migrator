@@ -1,0 +1,13 @@
+{
+  "$comment": "Exceptions and quirks only. Version requirements are read from published @angular/* metadata (plan section 7.2).",
+  "oldestSupportedMajor": 12,
+  "ngccRemovedIn": 16,
+  "standaloneDefaultFrom": 19,
+  "notes": {
+    "15": ["Angular Material switched to MDC-based components; legacy components remain importable until 17."],
+    "16": ["ngcc was removed: libraries still published in View Engine format no longer work."],
+    "17": ["The esbuild-based application builder is available; webpack builders keep working."],
+    "19": ["Components, directives and pipes are standalone by default; ng update adds standalone: false where needed."]
+  }
+}
+
