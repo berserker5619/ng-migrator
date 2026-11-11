@@ -13,7 +13,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/berserker5619/ng-migrator.git"
+    "url": "git+https://github.com/berserker5619/ng-migrator.git"
   },
   "bugs": {
     "url": "https://github.com/berserker5619/ng-migrator/issues"
