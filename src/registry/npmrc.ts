@@ -85,3 +85,4 @@ export function authHeaderFor(url: string, config: NpmrcConfig): string | undefi
   }
   return best?.header;
 }
+

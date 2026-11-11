@@ -36,6 +36,7 @@ export const ERRORS = {
   'NGM-3006': { exitCode: ExitCode.Precondition, title: 'Path is outside the project' },
   'NGM-3007': { exitCode: ExitCode.Precondition, title: 'Not an Angular project' },
   'NGM-3008': { exitCode: ExitCode.Precondition, title: 'Angular version not supported' },
+  'NGM-4001': { exitCode: ExitCode.HardBlockers, title: 'Hard blockers found during analysis' },
   'NGM-6001': { exitCode: ExitCode.Environment, title: 'Unsupported Node version' },
   'NGM-6002': { exitCode: ExitCode.Environment, title: 'Blocked subprocess' },
   'NGM-6003': { exitCode: ExitCode.Environment, title: 'Registry authentication failed' },

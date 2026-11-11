@@ -1,7 +1,28 @@
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import { Command, CommanderError, Option } from 'commander';
 import semver from 'semver';
-import { PACKAGE_MANAGERS } from '../config/config.js';
+import {
+  PACKAGE_MANAGERS,
+  readConfigFile,
+  resolveConfig,
+  type PackageManager,
+} from '../config/config.js';
 import { ExitCode, NgmError, isNgmError } from '../errors.js';
+import { checkGitStatus } from '../platform/git.js';
+import { writeGeneratedText } from '../platform/text.js';
+import { getStepRequirements } from '../planner/metadata.js';
+import { createPlan } from '../planner/plan.js';
+import { readProject } from '../reader/project.js';
+import { RegistryClient } from '../registry/client.js';
+import { loadNpmrc } from '../registry/npmrc.js';
+import { resolveStepDependencies } from '../resolver/resolve.js';
+import { withLock } from '../state/lock.js';
+import { readState, writeState } from '../state/state.js';
+import {
+  extractDecisionsFromFile,
+  writePlanDocuments,
+} from '../steps/writer.js';
 import { NODE_RANGE, TOOL_NAME, TOOL_VERSION } from '../version.js';
 import { Output, shouldUseColor, type Writer } from './output.js';
 
@@ -20,7 +41,6 @@ interface GlobalOptions {
   verbose?: boolean;
 }
 
-/** Parse `--to` as a plain Angular major such as 19. Ranges and minors are rejected. */
 export function parseTargetMajor(value: string): number {
   if (!/^\d+$/.test(value.trim())) {
     throw new NgmError('NGM-2002', `--to must be a single Angular major version such as 19, not "${value}".`, {
@@ -30,10 +50,6 @@ export function parseTargetMajor(value: string): number {
   const major = Number(value);
   if (major < 2) throw new NgmError('NGM-2002', `--to ${major} is not an Angular (2+) major version.`);
   return major;
-}
-
-function notImplemented(command: string, phase: string): never {
-  throw new NgmError('NGM-1002', `"${command}" is not implemented yet (planned for ${phase}).`);
 }
 
 export function createProgram(io: CliIo, getOutput: () => Output): Command {
@@ -55,14 +71,116 @@ export function createProgram(io: CliIo, getOutput: () => Output): Command {
   program
     .command('doctor')
     .description('check the machine and project before starting')
-    .action(() => notImplemented('doctor', 'phase 2'));
+    .action(async () => {
+      const out = getOutput();
+      out.info('Running pre-upgrade environment and project checks...\n');
+
+      // 1. Node version
+      if (semver.satisfies(io.nodeVersion, NODE_RANGE)) {
+        out.success(`Node runtime: ${io.nodeVersion} (satisfies ${NODE_RANGE})`);
+      } else {
+        out.warn(`Node runtime: ${io.nodeVersion} (recommended: ${NODE_RANGE})`);
+      }
+
+      // 2. Git status
+      const git = await checkGitStatus(io.cwd);
+      if (!git.isGitRepo) {
+        out.info('Git repository: not detected (working directory is clean).');
+      } else if (git.clean) {
+        out.success(`Git working tree is clean (HEAD: ${git.headCommit?.slice(0, 7) ?? 'unknown'})`);
+      } else {
+        out.warn(`Git working tree has ${git.dirtyEntries.length} uncommitted change(s).`);
+      }
+
+      // 3. Project read
+      try {
+        const project = await readProject(io.cwd);
+        out.success(`Project: ${project.name ?? 'unnamed'} (Angular ${project.angular.version ?? 'unknown'})`);
+        out.success(`Package manager: ${project.packageManager.name} (${project.packageManager.source})`);
+        out.success(`Workspace structure: ${project.workspace}, style: ${project.style}`);
+
+        if (project.warnings.length > 0) {
+          out.info('\nProject warnings:');
+          for (const w of project.warnings) out.warn(`  - ${w}`);
+        }
+      } catch (err) {
+        out.error(`Project check failed: ${(err as Error).message}`);
+      }
+
+      out.info('\nDoctor check completed.');
+    });
 
   program
     .command('analyze')
     .description('report what the project has and what blocks the next upgrade')
     .option('--fail-on-blockers', 'exit with code 4 when hard blockers are found')
     .option('--report <path>', 'write the report to this path')
-    .action(() => notImplemented('analyze', 'phase 1'));
+    .option('--offline', 'use cached registry data only')
+    .action(async (opts: { failOnBlockers?: boolean; report?: string; offline?: boolean }) => {
+      const out = getOutput();
+      const project = await readProject(io.cwd);
+
+      const currentMajor = project.angular.major;
+      if (!currentMajor) {
+        throw new NgmError('NGM-3007', 'Could not detect Angular version from project dependencies.');
+      }
+      const nextMajor = currentMajor + 1;
+
+      const { config: fileConfig } = await readConfigFile(io.cwd);
+      const config = resolveConfig({}, fileConfig, { packageManager: project.packageManager.name });
+      const npmrc = await loadNpmrc(io.cwd, io.env);
+      const registry = new RegistryClient({
+        npmrc,
+        cacheDir: path.resolve(io.cwd, config.cacheDir),
+        offline: opts.offline,
+        onWarning: (msg) => out.warn(msg),
+      });
+
+      out.info(`Analyzing project: ${project.name ?? path.basename(io.cwd)}`);
+      out.info(`Current Angular: ${project.angular.version} (major ${currentMajor}) -> Target step: ${nextMajor}\n`);
+
+      const requirements = await getStepRequirements(nextMajor, registry);
+      const resolution = await resolveStepDependencies({
+        project,
+        requirements,
+        registry,
+        pinned: config.pinned,
+        neverTouch: config.neverTouch,
+      });
+
+      out.info(`Dependencies analyzed: ${project.dependencies.length}`);
+      out.info(`Proposed package updates: ${resolution.changes.length}`);
+      out.info(`Held back releases: ${resolution.heldBack.length}`);
+      out.info(`Blockers detected: ${resolution.blockers.length}\n`);
+
+      if (resolution.blockers.length > 0) {
+        out.warn('Blockers for next major:');
+        for (const b of resolution.blockers) {
+          out.warn(`  [${b.reason}] ${b.package}: ${b.details}`);
+        }
+        out.info('');
+      } else {
+        out.success('No dependency blockers found for immediate next major.');
+      }
+
+      if (opts.report) {
+        const reportPath = path.resolve(io.cwd, opts.report);
+        const reportData = {
+          project: project.name,
+          currentAngular: project.angular.version,
+          nextMajor,
+          blockers: resolution.blockers,
+          changes: resolution.changes,
+          heldBack: resolution.heldBack,
+        };
+        await writeGeneratedText(reportPath, `${JSON.stringify(reportData, null, 2)}\n`);
+        out.success(`Analysis report written to: ${reportPath}`);
+      }
+
+      if (opts.failOnBlockers && resolution.blockers.some((b) => b.hard)) {
+        throw new NgmError('NGM-4001', `Found ${resolution.blockers.length} hard blocker(s) during analysis.`);
+      }
+    });
 
   program
     .command('plan')
@@ -72,32 +190,153 @@ export function createProgram(io: CliIo, getOutput: () => Output): Command {
     .option('--rules <path...>', 'extra rule files')
     .option('--offline', 'use cached registry data only')
     .option('--allow-dirty', 'allow uncommitted changes in the working tree')
-    .action((opts: { to: string }) => {
-      const major = parseTargetMajor(opts.to);
-      getOutput().debug(`target major: ${major}`);
-      notImplemented('plan', 'phase 1');
+    .action(async (opts: {
+      to: string;
+      packageManager?: PackageManager;
+      rules?: string[];
+      offline?: boolean;
+      allowDirty?: boolean;
+    }) => {
+      const out = getOutput();
+      const targetMajor = parseTargetMajor(opts.to);
+
+      // Check clean working tree
+      const git = await checkGitStatus(io.cwd);
+      if (git.isGitRepo && !git.clean && !opts.allowDirty) {
+        throw new NgmError(
+          'NGM-3001',
+          `Working tree has uncommitted changes (${git.dirtyEntries.length} file(s)). Commit or stash them, or pass --allow-dirty.`,
+          { hint: 'ng-migrator plans and runs safely when starting from a known commit.' },
+        );
+      }
+
+      await withLock(io.cwd, 'plan', async () => {
+        const project = await readProject(io.cwd);
+        const { config: fileConfig } = await readConfigFile(io.cwd);
+        const config = resolveConfig(
+          { packageManager: opts.packageManager, rules: opts.rules },
+          fileConfig,
+          { packageManager: project.packageManager.name },
+        );
+
+        const npmrc = await loadNpmrc(io.cwd, io.env);
+        const registry = new RegistryClient({
+          npmrc,
+          cacheDir: path.resolve(io.cwd, config.cacheDir),
+          offline: opts.offline,
+          onWarning: (msg) => out.warn(msg),
+        });
+
+        out.info(`Planning upgrade: Angular ${project.angular.version} -> ${targetMajor}...`);
+        const plan = await createPlan({
+          project,
+          targetMajor,
+          registry,
+          config,
+          verifyResolution: !opts.offline,
+        });
+
+        await writePlanDocuments(io.cwd, plan);
+
+        out.success(`\nPlan generated successfully (${plan.steps.length} step(s)):`);
+        for (const s of plan.steps) {
+          const prov = s.provisional ? ' [provisional]' : '';
+          const blockers = s.blockers.length > 0 ? ` (${s.blockers.length} blocker(s))` : '';
+          out.info(`  Step ${s.index}: Angular ${s.from} -> ${s.to}${prov}${blockers}`);
+        }
+
+        out.info(`\nSummary runbook written to: .ng-migrator/summary.md`);
+        out.info(`First step review: .ng-migrator/steps/01-angular-${plan.steps[0]?.from}-to-${plan.steps[0]?.to}.md`);
+        out.info(`Run "ng-migrator approve 1" after reviewing.`);
+      });
     });
 
   program
     .command('status')
     .description('show which steps are planned, approved, done or failed')
-    .action(() => notImplemented('status', 'phase 2'));
+    .action(async () => {
+      const out = getOutput();
+      const state = await readState(io.cwd);
+      if (!state || state.steps.length === 0) {
+        out.info('No active migration plan found.');
+        out.info('Run "ng-migrator plan --to <major>" to generate a plan.');
+        return;
+      }
+
+      out.info(`Migration status: Angular ${state.startVersion ?? '?'} -> ${state.targetMajor ?? '?'}`);
+      out.info(`Steps (${state.steps.length} total):\n`);
+
+      for (const step of state.steps) {
+        const symbol =
+          step.status === 'done'
+            ? out.symbols.ok
+            : step.status === 'failed'
+              ? out.symbols.fail
+              : step.status === 'approved'
+                ? '★'
+                : out.symbols.bullet;
+        out.info(`  ${symbol} Step ${step.index}: Angular ${step.from} -> ${step.to} [${step.status}]`);
+      }
+      out.info('');
+    });
 
   program
     .command('approve')
     .description('approve a step after reading its document')
     .argument('<step>', 'step number')
-    .action((step: string) => {
-      if (!/^\d+$/.test(step) || Number(step) < 1) {
-        throw new NgmError('NGM-2001', `Step must be a positive number, not "${step}".`);
+    .action(async (stepArg: string) => {
+      const out = getOutput();
+      if (!/^\d+$/.test(stepArg) || Number(stepArg) < 1) {
+        throw new NgmError('NGM-2001', `Step must be a positive number, not "${stepArg}".`);
       }
-      notImplemented('approve', 'phase 2');
+      const stepIndex = Number(stepArg);
+
+      await withLock(io.cwd, 'approve', async () => {
+        const state = await readState(io.cwd);
+        if (!state) {
+          throw new NgmError('NGM-3005', 'No migration state found. Run "ng-migrator plan --to <major>" first.');
+        }
+
+        const step = state.steps.find((s) => s.index === stepIndex);
+        if (!step) {
+          throw new NgmError('NGM-2001', `Step ${stepIndex} does not exist in the current plan.`);
+        }
+
+        const stepFileName = `${String(step.index).padStart(2, '0')}-angular-${step.from}-to-${step.to}.md`;
+        const stepFilePath = path.join(io.cwd, '.ng-migrator', 'steps', stepFileName);
+        const decisions = await extractDecisionsFromFile(stepFilePath);
+
+        step.decisions = { ...step.decisions, ...decisions };
+        const openDecisions = Object.entries(step.decisions).filter(([, checked]) => !checked);
+        if (openDecisions.length > 0) {
+          out.warn(`Step ${stepIndex} has ${openDecisions.length} open decision(s) in ${stepFileName}.`);
+        }
+
+        step.status = 'approved';
+        step.approvedAt = new Date().toISOString();
+
+        await writeState(io.cwd, state);
+
+        // Re-read step file to update approval status line
+        try {
+          const content = await readFile(stepFilePath, 'utf8');
+          const updated = content.replace(
+            /## Approval\nStatus: [^\n]+/g,
+            `## Approval\nStatus: approved at ${step.approvedAt}`,
+          );
+          await writeGeneratedText(stepFilePath, updated);
+        } catch {
+          // ignore if document was moved
+        }
+
+        out.success(`Step ${stepIndex} (Angular ${step.from} to ${step.to}) is now approved.`);
+        out.info('Follow the planned actions in the step document or commit your review.');
+      });
     });
 
   return program;
 }
 
-/** Run the CLI and return the exit code. Never calls process.exit, so it is testable. */
 export async function runCli(argv: readonly string[], io: CliIo): Promise<number> {
   let output = new Output(io.stdout, io.stderr, { color: shouldUseColor(undefined, io.isTTY, io.env), ascii: false, verbose: false });
   const getOutput = () => output;
@@ -122,7 +361,6 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     return ExitCode.Success;
   } catch (err) {
     if (err instanceof CommanderError) {
-      // --help and --version end with a CommanderError carrying exit code 0.
       if (err.exitCode === 0) return ExitCode.Success;
       output.error(`NGM-2001 ${err.message.replace(/^error:\s*/i, '')}`);
       return ExitCode.Usage;
@@ -138,4 +376,3 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     return ExitCode.Unexpected;
   }
 }
-

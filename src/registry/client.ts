@@ -191,3 +191,4 @@ export function inAngularMajor(version: string, major: number): boolean {
   if (v.major === major) return true;
   return v.major === 0 && v.minor >= 1000 && Math.floor(v.minor / 100) === major;
 }
+

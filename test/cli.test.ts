@@ -59,8 +59,8 @@ describe('cli', () => {
 
   it('uses ASCII symbols and no color when asked', async () => {
     const t = io({ isTTY: true });
-    await runCli(['--no-color', '--ascii', 'status'], t.value);
-    expect(t.err()).toContain('[x] NGM-1002');
+    await runCli(['--no-color', '--ascii', 'plan', '--to', '19.1'], t.value);
+    expect(t.err()).toContain('[x] NGM-2002');
     expect(t.err()).not.toContain('\u001b[');
   });
 
