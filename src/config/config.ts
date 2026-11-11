@@ -16,6 +16,7 @@ export interface FileConfig {
   alternates?: { allow?: string[]; deny?: string[] };
   verify?: { build?: string; lint?: string; test?: string };
   cacheDir?: string;
+  unmaintainedThresholdMonths?: number;
   /** One prefix for every step, or a map keyed by the step's target major n. */
   commandPrefix?: string | Record<string, string>;
 }
@@ -39,6 +40,7 @@ export interface ResolvedConfig {
   alternates: { allow: string[]; deny: string[] };
   verify: { build?: string; lint?: string; test?: string };
   cacheDir: string;
+  unmaintainedThresholdMonths: number;
   commandPrefix: string | Record<string, string> | undefined;
 }
 
@@ -50,6 +52,7 @@ const KNOWN_KEYS = new Set([
   'alternates',
   'verify',
   'cacheDir',
+  'unmaintainedThresholdMonths',
   'commandPrefix',
 ]);
 
@@ -106,6 +109,12 @@ export function validateFileConfig(raw: unknown): { config: FileConfig; warnings
     if (typeof raw.cacheDir !== 'string') fail('cacheDir', 'a string');
     c.cacheDir = raw.cacheDir;
   }
+  if (raw.unmaintainedThresholdMonths !== undefined) {
+    if (typeof raw.unmaintainedThresholdMonths !== 'number' || raw.unmaintainedThresholdMonths <= 0) {
+      fail('unmaintainedThresholdMonths', 'a positive number of months');
+    }
+    c.unmaintainedThresholdMonths = raw.unmaintainedThresholdMonths;
+  }
   if (raw.commandPrefix !== undefined) {
     const p = raw.commandPrefix;
     if (typeof p === 'string') c.commandPrefix = p;
@@ -136,6 +145,7 @@ export function resolveConfig(flags: FlagConfig, file: FileConfig, detected: Det
     alternates: { allow: [...(file.alternates?.allow ?? [])], deny: [...(file.alternates?.deny ?? [])] },
     verify: { ...(file.verify ?? {}) },
     cacheDir: file.cacheDir ?? '.ng-migrator/cache',
+    unmaintainedThresholdMonths: file.unmaintainedThresholdMonths ?? 18,
     commandPrefix: file.commandPrefix,
   };
 }

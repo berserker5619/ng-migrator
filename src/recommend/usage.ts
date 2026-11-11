@@ -88,10 +88,23 @@ export async function analyzePackageUsage(
       ts.forEachChild(node, visit);
     }
 
+    // Also scan inline templates in TypeScript components
+    const inlineTemplateMatch = /template\s*:\s*[`'"]([\s\S]*?)[`'"]/.exec(code);
+    if (inlineTemplateMatch && inlineTemplateMatch[1]) {
+      const inlineTpl = inlineTemplateMatch[1];
+      if (packageName === '@angular/flex-layout') {
+        const fxMatches = inlineTpl.match(/\b(fx[A-Z][a-zA-Z0-9]*|fx[a-z-]+)\b/g);
+        if (fxMatches) {
+          templateOccurrences += fxMatches.length;
+          referencingFiles.add(relFile);
+        }
+      }
+    }
+
     visit(sourceFile);
   }
 
-  // Scan templates for selector usages based on imported symbol names or package name hints
+  // Scan HTML templates for selector usages and package-specific directives
   const symbolWords = [...importedSymbols]
     .map((s) => s.replace(/Directive|Component|Pipe|Module/g, '').toLowerCase())
     .filter((w) => w.length > 2);
@@ -100,10 +113,19 @@ export async function analyzePackageUsage(
     const fullPath = path.join(projectRoot, relHtml);
     try {
       const html = await readFile(fullPath, 'utf8');
-      for (const word of symbolWords) {
-        if (html.toLowerCase().includes(word)) {
-          templateOccurrences++;
+
+      if (packageName === '@angular/flex-layout') {
+        const fxMatches = html.match(/\b(fx[A-Z][a-zA-Z0-9]*|fx[a-z-]+)\b/g);
+        if (fxMatches) {
+          templateOccurrences += fxMatches.length;
           referencingFiles.add(relHtml);
+        }
+      } else {
+        for (const word of symbolWords) {
+          if (html.toLowerCase().includes(word)) {
+            templateOccurrences++;
+            referencingFiles.add(relHtml);
+          }
         }
       }
     } catch {

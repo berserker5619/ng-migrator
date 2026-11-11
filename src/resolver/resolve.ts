@@ -7,8 +7,13 @@ import type {
   StepRequirements,
 } from '../model.js';
 import { computeRecommendation } from '../recommend/engine.js';
-import { getBuiltInRules, type MigrationRule } from '../recommend/rules.js';
-import { inAngularMajor, stableVersionsDesc, type RegistryClient } from '../registry/client.js';
+import { findRule, getBuiltInRules, type MigrationRule } from '../recommend/rules.js';
+import {
+  allVersionsDesc,
+  inAngularMajor,
+  type Packument,
+  type RegistryClient,
+} from '../registry/client.js';
 import { preserveRangeStyle, satisfiesAngularPeer } from './range.js';
 
 export interface ResolveStepOptions {
@@ -20,6 +25,8 @@ export interface ResolveStepOptions {
   rules?: readonly MigrationRule[];
   alternatesAllow?: readonly string[];
   alternatesDeny?: readonly string[];
+  unmaintainedThresholdMonths?: number;
+  now?: number;
 }
 
 export interface StepResolution {
@@ -29,10 +36,42 @@ export interface StepResolution {
   blockers: Blocker[];
 }
 
+export function isPackageUnmaintained(
+  pack: Packument,
+  version: string,
+  rule: MigrationRule | undefined,
+  thresholdMonths: number = 18,
+  nowMs: number = Date.now(),
+): boolean {
+  if (rule?.status === 'deprecated' || rule?.status === 'abandoned') {
+    return true;
+  }
+  const meta = pack.versions[version];
+  const dateStr = meta?.releaseDate ?? pack.time?.[version] ?? pack.time?.modified ?? pack.modified;
+  if (dateStr) {
+    const timeMs = new Date(dateStr).getTime();
+    if (!Number.isNaN(timeMs)) {
+      const diffMonths = (nowMs - timeMs) / (1000 * 60 * 60 * 24 * 30.4375);
+      if (diffMonths >= thresholdMonths) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 export async function resolveStepDependencies(
   options: ResolveStepOptions,
 ): Promise<StepResolution> {
-  const { project, requirements, registry, pinned = {}, neverTouch = [] } = options;
+  const {
+    project,
+    requirements,
+    registry,
+    pinned = {},
+    neverTouch = [],
+    unmaintainedThresholdMonths = 18,
+    now = Date.now(),
+  } = options;
   const changes: PackageChange[] = [];
   const unchanged: string[] = [];
   const heldBack: HeldBack[] = [];
@@ -41,6 +80,7 @@ export async function resolveStepDependencies(
   const neverTouchSet = new Set(neverTouch);
   const targetMajor = requirements.major;
   const coreVersion = requirements.coreVersion;
+  const activeRules = options.rules ?? getBuiltInRules();
 
   for (const dep of project.dependencies) {
     if (neverTouchSet.has(dep.name)) {
@@ -64,6 +104,8 @@ export async function resolveStepDependencies(
       continue;
     }
 
+    const rule = findRule(dep.name, activeRules);
+
     // Angular framework / devkit packages
     if (dep.name.startsWith('@angular/') || dep.name.startsWith('@angular-devkit/')) {
       const pack = await registry.packument(dep.name);
@@ -77,9 +119,29 @@ export async function resolveStepDependencies(
         });
         continue;
       }
-      const versions = stableVersionsDesc(pack).filter((v) => inAngularMajor(v, targetMajor));
+
+      // Check if rule says lastReleaseFor and targetMajor > lastReleaseFor
+      if (rule?.lastReleaseFor && targetMajor > rule.lastReleaseFor) {
+        blockers.push({
+          package: dep.name,
+          reason: 'no-compatible-version',
+          hard: true,
+          details: `No release of ${dep.name} found for Angular ${targetMajor}. Last release was for Angular ${rule.lastReleaseFor}.`,
+          current: dep.installed ?? dep.declared,
+        });
+        continue;
+      }
+
+      const allReleases = allVersionsDesc(pack);
+      const versions = allReleases.filter((v) => {
+        const meta = pack.versions[v];
+        if (inAngularMajor(v, targetMajor)) {
+          return satisfiesAngularPeer(meta?.peerDependencies, coreVersion, targetMajor, v);
+        }
+        return satisfiesAngularPeer(meta?.peerDependencies, coreVersion, targetMajor, v);
+      });
+
       if (versions.length === 0) {
-        // Some optional packages might not have a release in this major
         blockers.push({
           package: dep.name,
           reason: 'no-compatible-version',
@@ -89,7 +151,13 @@ export async function resolveStepDependencies(
         });
         continue;
       }
-      const targetVersion = versions[0]!;
+
+      // Prefer stable release if available, otherwise prerelease
+      const targetVersion = versions.find((v) => semver.prerelease(v) === null) ?? versions[0]!;
+      const meta = pack.versions[targetVersion];
+      const isDeprecated = Boolean(meta?.deprecated);
+      const isUnmaint = isPackageUnmaintained(pack, targetVersion, rule, unmaintainedThresholdMonths, now);
+
       changes.push({
         name: dep.name,
         type: dep.type,
@@ -97,9 +165,21 @@ export async function resolveStepDependencies(
         currentSpec: dep.declared,
         target: targetVersion,
         targetSpec: preserveRangeStyle(targetVersion, dep.declared),
-        reason: `Target major ${targetMajor}`,
+        reason: `Peer range supports Angular ${targetMajor}`,
         evidence: 'declared',
+        deprecated: meta?.deprecated,
+        unmaintained: isUnmaint,
       });
+
+      if (isDeprecated) {
+        blockers.push({
+          package: dep.name,
+          reason: 'deprecated',
+          hard: false,
+          details: meta?.deprecated ?? `Package ${dep.name} is deprecated on npm.`,
+          current: dep.installed ?? dep.declared,
+        });
+      }
       continue;
     }
 
@@ -107,8 +187,9 @@ export async function resolveStepDependencies(
     if (dep.name === 'typescript' && requirements.typescript) {
       const pack = await registry.packument('typescript');
       if (pack) {
-        const versions = stableVersionsDesc(pack).filter((v) =>
-          semver.satisfies(v, requirements.typescript!),
+        const allReleases = allVersionsDesc(pack);
+        const versions = allReleases.filter(
+          (v) => semver.satisfies(v, requirements.typescript!) && semver.prerelease(v) === null,
         );
         if (versions.length > 0) {
           const target = versions[0]!;
@@ -131,8 +212,9 @@ export async function resolveStepDependencies(
     if (dep.name === 'rxjs' && requirements.rxjs) {
       const pack = await registry.packument('rxjs');
       if (pack) {
-        const versions = stableVersionsDesc(pack).filter((v) =>
-          semver.satisfies(v, requirements.rxjs!),
+        const allReleases = allVersionsDesc(pack);
+        const versions = allReleases.filter(
+          (v) => semver.satisfies(v, requirements.rxjs!) && semver.prerelease(v) === null,
         );
         if (versions.length > 0) {
           const target = versions[0]!;
@@ -155,8 +237,9 @@ export async function resolveStepDependencies(
     if (dep.name === 'zone.js' && requirements.zone) {
       const pack = await registry.packument('zone.js');
       if (pack) {
-        const versions = stableVersionsDesc(pack).filter((v) =>
-          semver.satisfies(v, requirements.zone!),
+        const allReleases = allVersionsDesc(pack);
+        const versions = allReleases.filter(
+          (v) => semver.satisfies(v, requirements.zone!) && semver.prerelease(v) === null,
         );
         if (versions.length > 0) {
           const target = versions[0]!;
@@ -182,10 +265,10 @@ export async function resolveStepDependencies(
       continue;
     }
 
-    const allStable = stableVersionsDesc(pack);
+    const allReleases = allVersionsDesc(pack);
 
     // Look for newer releases that require Angular > targetMajor (held back)
-    for (const v of allStable) {
+    for (const v of allReleases) {
       const meta = pack.versions[v];
       const peer = meta?.peerDependencies?.['@angular/core'];
       if (peer) {
@@ -201,18 +284,29 @@ export async function resolveStepDependencies(
       }
     }
 
-    // Propose newest version compatible with target Angular
-    const compatible = allStable.filter((v) => {
-      const meta = pack.versions[v];
-      return satisfiesAngularPeer(meta?.peerDependencies, coreVersion, targetMajor);
-    });
+    // Check if rule says lastReleaseFor and targetMajor > lastReleaseFor
+    let hasReleaseForTarget = true;
+    if (rule?.lastReleaseFor && targetMajor > rule.lastReleaseFor) {
+      hasReleaseForTarget = false;
+    }
 
-    if (compatible.length > 0) {
-      const targetVersion = compatible[0]!;
+    // Propose newest version compatible with target Angular
+    const compatible = hasReleaseForTarget
+      ? allReleases.filter((v) => {
+          const meta = pack.versions[v];
+          return satisfiesAngularPeer(meta?.peerDependencies, coreVersion, targetMajor, v);
+        })
+      : [];
+
+    const targetVersion = compatible.find((v) => semver.prerelease(v) === null) ?? compatible[0];
+
+    if (targetVersion) {
       const meta = pack.versions[targetVersion];
       const currentVersion = dep.installed ?? semver.minVersion(dep.declared)?.version;
+      const isDeprecated = Boolean(meta?.deprecated);
+      const isUnmaint = isPackageUnmaintained(pack, targetVersion, rule, unmaintainedThresholdMonths, now);
 
-      if (currentVersion && semver.eq(currentVersion, targetVersion)) {
+      if (currentVersion && semver.eq(currentVersion, targetVersion) && !isDeprecated && !isUnmaint) {
         unchanged.push(dep.name);
       } else {
         changes.push({
@@ -225,18 +319,29 @@ export async function resolveStepDependencies(
           reason: `Peer range supports Angular ${targetMajor}`,
           evidence: 'declared',
           deprecated: meta?.deprecated,
+          unmaintained: isUnmaint,
+        });
+      }
+
+      if (isDeprecated) {
+        blockers.push({
+          package: dep.name,
+          reason: 'deprecated',
+          hard: false,
+          details: meta?.deprecated ?? `Package ${dep.name} is deprecated on npm.`,
+          current: dep.installed ?? dep.declared,
         });
       }
     } else {
-      // Check if it actually declares an Angular peer dependency
-      const hasAngularPeer = allStable.some(
+      // Check if it actually declares an Angular peer dependency or rule specifies lastReleaseFor
+      const hasAngularPeer = allReleases.some(
         (v) => pack.versions[v]?.peerDependencies?.['@angular/core'] !== undefined,
       );
 
-      if (hasAngularPeer) {
+      if (hasAngularPeer || rule?.lastReleaseFor) {
         // Find last version that supported targetMajor - 1
-        const lastCompat = allStable.find((v) =>
-          satisfiesAngularPeer(pack.versions[v]?.peerDependencies, `${targetMajor - 1}.99.99`, targetMajor - 1),
+        const lastCompat = allReleases.find((v) =>
+          satisfiesAngularPeer(pack.versions[v]?.peerDependencies, `${targetMajor - 1}.99.99`, targetMajor - 1, v),
         );
 
         blockers.push({
@@ -270,7 +375,6 @@ export async function resolveStepDependencies(
   }
 
   // Enrich blockers with recommendations
-  const activeRules = options.rules ?? getBuiltInRules();
   for (const b of blockers) {
     const rec = await computeRecommendation({
       projectRoot: project.root,
@@ -283,9 +387,14 @@ export async function resolveStepDependencies(
       denyList: options.alternatesDeny,
     });
     b.recommendation = rec.recommendation;
+    b.recommendedFix = rec.recommendedFix;
+    b.source = rec.source;
     b.confidence = rec.confidence;
     b.effort = rec.effort;
     b.runnerUp = rec.runnerUp;
+    if (rec.usage) {
+      b.usage = rec.usage;
+    }
     if (!b.details.includes('Recommendation:')) {
       b.details = `${b.details} ${rec.reasoning}`;
     }

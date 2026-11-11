@@ -1,0 +1,28 @@
+{
+  "name": "angular-14-login",
+  "repository": "https://github.com/cornflourblue/angular-14-registration-login-example",
+  "commit": "f766ca720d38c4ac136be4a6a14e76547d06265e",
+  "license": "MIT",
+  "startingAngular": "14.2.12",
+  "targetAngular": 17,
+  "steps": [
+    {
+      "step": 1,
+      "from": 14,
+      "to": 15,
+      "expectedBlockers": []
+    },
+    {
+      "step": 2,
+      "from": 15,
+      "to": 16,
+      "expectedBlockers": []
+    },
+    {
+      "step": 3,
+      "from": 16,
+      "to": 17,
+      "expectedBlockers": []
+    }
+  ]
+}

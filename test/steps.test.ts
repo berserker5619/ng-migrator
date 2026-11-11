@@ -1,9 +1,10 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Plan, PlannedStep } from '../src/model.js';
 import {
   extractDecisionsFromFile,
   formatStepDocument,
+  generateDecisionId,
   writePlanDocuments,
 } from '../src/steps/writer.js';
 import { tempProject } from './helpers.js';
@@ -13,7 +14,23 @@ let cleanup: () => Promise<void>;
 beforeEach(async () => ({ dir, cleanup } = await tempProject()));
 afterEach(async () => cleanup());
 
-describe('steps writer', () => {
+describe('steps writer and decision tracking', () => {
+  it('generates stable decision ids for scoped names, dots, hyphens and underscores', () => {
+    const id1 = generateDecisionId('@scope/name');
+    const id2 = generateDecisionId('pkg.name.js');
+    const id3 = generateDecisionId('my-pkg-name');
+    const id4 = generateDecisionId('my_pkg_name');
+
+    expect(id1).toMatch(/^blocker-scope-name-[a-f0-9]{8}$/);
+    expect(id2).toMatch(/^blocker-pkg-name-js-[a-f0-9]{8}$/);
+    expect(id3).toMatch(/^blocker-my-pkg-name-[a-f0-9]{8}$/);
+    expect(id4).toMatch(/^blocker-my-pkg-name-[a-f0-9]{8}$/);
+
+    // Stable / deterministic
+    expect(generateDecisionId('@scope/name')).toBe(id1);
+    expect(generateDecisionId('pkg.name.js')).toBe(id2);
+  });
+
   const sampleStep: PlannedStep = {
     index: 1,
     from: 15,
@@ -49,6 +66,11 @@ describe('steps writer', () => {
         hard: true,
         details: 'No release supports Angular 16',
         recommendation: 'inline',
+        recommendedFix: 'Write replacement in project codebase',
+        source: 'analysis',
+        confidence: 'high',
+        effort: '2 to 3 hours',
+        runnerUp: 'alternate package',
       },
     ],
     resolution: { status: 'confirmed' },
@@ -64,78 +86,77 @@ describe('steps writer', () => {
     steps: [sampleStep],
   };
 
-  it('formats markdown step documents with headers, requirements, diffs and decisions', () => {
+  it('formats markdown step documents with declared compatible evidence label and recommendation fields', () => {
     const doc = formatStepDocument(sampleStep);
     expect(doc).toContain('# Step 1: Angular 15 to 16');
     expect(doc).toContain('- Node: ^16.14.0 || >=18.10.0');
     expect(doc).toContain('+ "@angular/core": "^16.2.12"');
-    expect(doc).toContain('some-tooltip-lib');
-    expect(doc).toContain('<!-- id: blocker-some-tooltip-lib -->');
+    expect(doc).toContain('declared compatible');
+    expect(doc).not.toContain('confirmed compatible');
+    expect(doc).toContain('- Recommended fix: Write replacement in project codebase');
+    expect(doc).toContain('- Source: analysis');
+    expect(doc).toContain('- Confidence: high');
+    expect(doc).toContain('- Estimated effort: 2 to 3 hours');
+    expect(doc).toContain('- Runner-up: alternate package');
+    expect(doc).toContain(`<!-- id: ${generateDecisionId('some-tooltip-lib')} -->`);
     expect(doc).toContain('Status: pending. Run: npx ng-migrator approve 1');
   });
 
-  it('writes step files and summary, and preserves ticked decisions across re-generation', async () => {
+  it('preserves ticked decisions and reviewer notes across plan regeneration', async () => {
     // 1. Initial generation
     const res = await writePlanDocuments(dir, samplePlan);
     const stepFile = res.stepFiles[0]!;
 
     const initialContent = await readFile(stepFile, 'utf8');
-    expect(initialContent).toContain('- [ ] Decide resolution for some-tooltip-lib');
+    const stableId = generateDecisionId('some-tooltip-lib');
+    expect(initialContent).toContain(`- [ ] Decide resolution for some-tooltip-lib (no-compatible-version) <!-- id: ${stableId} -->`);
 
-    // 2. Simulate user checking a decision checkbox in the markdown file
-    const checkedContent = initialContent.replace(
-      '- [ ] Decide resolution for some-tooltip-lib',
-      '- [x] Decide resolution for some-tooltip-lib',
-    );
-    await writePlanDocuments(dir, samplePlan); // should be stable
+    // 2. Simulate user ticking the decision and adding reviewer notes
+    const editedContent = initialContent
+      .replace(
+        `- [ ] Decide resolution for some-tooltip-lib (no-compatible-version) <!-- id: ${stableId} -->`,
+        `- [x] Decide resolution for some-tooltip-lib (no-compatible-version) <!-- id: ${stableId} -->`,
+      )
+      .replace(
+        '<!-- reviewer-notes: start -->\n(Optional reviewer notes)\n<!-- reviewer-notes: end -->',
+        '<!-- reviewer-notes: start -->\nReviewed by Team Lead. Inlining directive in src/app/shared.\n<!-- reviewer-notes: end -->',
+      );
 
-    // Extract decisions check
-    const decisions = await extractDecisionsFromFile(stepFile);
-    expect(decisions['blocker-some-tooltip-lib']).toBe(false);
+    await writeFile(stepFile, editedContent);
 
-    // Manually write the checked decision to the file
-    const { writeFile } = await import('node:fs/promises');
-    await writeFile(stepFile, checkedContent);
+    // Verify extraction
+    const extracted = await extractDecisionsFromFile(stepFile);
+    expect(extracted.decisions[stableId]).toBe(true);
+    expect(extracted.reviewerNotes).toBe('Reviewed by Team Lead. Inlining directive in src/app/shared.');
 
     // 3. Re-run writePlanDocuments
     await writePlanDocuments(dir, samplePlan);
     const reloadedContent = await readFile(stepFile, 'utf8');
 
-    // The checked decision must be preserved!
-    expect(reloadedContent).toContain('- [x] Decide resolution for some-tooltip-lib');
+    // Both ticked decision and reviewer notes must survive!
+    expect(reloadedContent).toContain(`- [x] Decide resolution for some-tooltip-lib (no-compatible-version) <!-- id: ${stableId} -->`);
+    expect(reloadedContent).toContain('Reviewed by Team Lead. Inlining directive in src/app/shared.');
+  });
 
-    // Scoped package decision test
-    const scopedStep: PlannedStep = {
-      ...sampleStep,
-      blockers: [
-        {
-          package: '@angular/flex-layout',
-          reason: 'no-compatible-version',
-          hard: true,
-          details: 'Deprecated and archived',
-          recommendation: 'alternate',
-        },
-      ],
-    };
-    const scopedPlan: Plan = {
-      ...samplePlan,
-      steps: [scopedStep],
-    };
-    const scopedRes = await writePlanDocuments(dir, scopedPlan);
-    const scopedFile = scopedRes.stepFiles[0]!;
-    const scopedInit = await readFile(scopedFile, 'utf8');
-    expect(scopedInit).toContain('<!-- id: blocker-@angular/flex-layout -->');
+  it('migrates legacy blocker-<pkg> decision ids seamlessly', async () => {
+    const legacyContent = `
+## Decisions needed
+- [x] Decide resolution for @angular/flex-layout (deprecated) <!-- id: blocker-@angular/flex-layout -->
 
-    const scopedChecked = scopedInit.replace(
-      '- [ ] Decide resolution for @angular/flex-layout',
-      '- [x] Decide resolution for @angular/flex-layout',
-    );
-    await writeFile(scopedFile, scopedChecked);
-    const scopedDecisions = await extractDecisionsFromFile(scopedFile);
-    expect(scopedDecisions['blocker-@angular/flex-layout']).toBe(true);
+## Reviewer notes
+<!-- reviewer-notes: start -->
+Legacy note
+<!-- reviewer-notes: end -->
+`;
+    const stepFile = `${dir}/legacy-step.md`;
+    await writeFile(stepFile, legacyContent);
 
-    await writePlanDocuments(dir, scopedPlan);
-    const scopedReloaded = await readFile(scopedFile, 'utf8');
-    expect(scopedReloaded).toContain('- [x] Decide resolution for @angular/flex-layout');
+    const extracted = await extractDecisionsFromFile(stepFile);
+    const stableId = generateDecisionId('@angular/flex-layout');
+
+    // Both legacy and new stable ID are true
+    expect(extracted.decisions['blocker-@angular/flex-layout']).toBe(true);
+    expect(extracted.decisions[stableId]).toBe(true);
+    expect(extracted.reviewerNotes).toBe('Legacy note');
   });
 });

@@ -2,7 +2,7 @@
   {
     "package": "@angular/flex-layout",
     "status": "deprecated",
-    "appliesFrom": 15,
+    "lastReleaseFor": 15,
     "category": "layout",
     "recommendation": "alternate",
     "alternatives": ["CSS flexbox/grid", "Tailwind CSS"],
@@ -11,7 +11,7 @@
   {
     "package": "ngx-clipboard",
     "status": "abandoned",
-    "appliesFrom": 16,
+    "lastReleaseFor": 15,
     "category": "utility",
     "recommendation": "inline",
     "notes": "Easily replaced with Angular CDK Clipboard (CdkCopyToClipboard) or navigator.clipboard in a small project directive."
@@ -19,7 +19,7 @@
   {
     "package": "ng2-tooltip-directive",
     "status": "abandoned",
-    "appliesFrom": 16,
+    "lastReleaseFor": 15,
     "category": "ui",
     "recommendation": "inline",
     "notes": "Simple tooltip directive. Angular CDK Overlay or a lightweight custom directive covers the same selector and inputs."
@@ -27,7 +27,7 @@
   {
     "package": "ngx-cookie-service",
     "status": "maintained",
-    "appliesFrom": 14,
+    "lastReleaseFor": 19,
     "category": "utility",
     "recommendation": "upgrade",
     "notes": "Official releases exist for newer Angular versions."

@@ -1,0 +1,28 @@
+{
+  "name": "angular-13-login",
+  "repository": "https://github.com/bezkoder/angular-13-login-registration-example",
+  "commit": "8eb9d13516642e15bc64e4ae157bf019a7872912",
+  "license": "unknown",
+  "startingAngular": "13.0.3",
+  "targetAngular": 16,
+  "steps": [
+    {
+      "step": 1,
+      "from": 13,
+      "to": 14,
+      "expectedBlockers": []
+    },
+    {
+      "step": 2,
+      "from": 14,
+      "to": 15,
+      "expectedBlockers": []
+    },
+    {
+      "step": 3,
+      "from": 15,
+      "to": 16,
+      "expectedBlockers": []
+    }
+  ]
+}

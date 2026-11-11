@@ -33,7 +33,7 @@ export async function findAlternateCandidates(
 
   for (const candidateName of candidates) {
     // If it's a generic technology or guidance (e.g. "CSS flexbox/grid", "Tailwind CSS")
-    if (!candidateName.includes('/') && candidateName.includes(' ')) {
+    if (candidateName.includes(' ') || candidateName === 'CSS flexbox/grid') {
       results.push({
         name: candidateName,
         supportsTargetAngular: true,

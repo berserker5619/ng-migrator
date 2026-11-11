@@ -36,6 +36,37 @@ describe('git guard', () => {
     off();
     expect(seen).toEqual([]);
   });
+
+  it('fails if any git command other than read-only ones (status, rev-parse, ls-files, version) is spawned', async () => {
+    const spawnedCommands: string[] = [];
+    const unregister = onSpawn((cmd, args) => {
+      if (cmd === 'git') {
+        const sub = gitSubcommand(args);
+        spawnedCommands.push(sub ?? '');
+      }
+    });
+
+    const disallowedGitCalls = [
+      ['commit', '-m', 'feat: should fail'],
+      ['push', 'origin', 'main'],
+      ['add', '.'],
+      ['checkout', '-b', 'bad-branch'],
+      ['merge', 'origin/main'],
+      ['rebase', 'main'],
+      ['tag', 'v9.9.9'],
+      ['reset', '--hard'],
+      ['revert', 'HEAD'],
+    ];
+
+    for (const args of disallowedGitCalls) {
+      await expect(run('git', args, { cwd: process.cwd() })).rejects.toThrow(NgmError);
+    }
+
+    unregister();
+
+    // Verify absolutely no disallowed git command was ever dispatched to spawn
+    expect(spawnedCommands).toEqual([]);
+  });
 });
 
 describe('command prefix', () => {

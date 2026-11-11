@@ -61,6 +61,8 @@ export interface PackageChange {
   evidence: 'declared' | 'verified';
   /** Set when the chosen release is deprecated on the registry. */
   deprecated?: string;
+  /** Set when the package has had no releases for >= threshold months or flagged by rule. */
+  unmaintained?: boolean;
 }
 
 export interface HeldBack {
@@ -81,9 +83,17 @@ export interface Blocker {
   /** Newest release that supported the previous major, if known. */
   lastCompatible?: string;
   recommendation?: 'upgrade' | 'alternate' | 'fork' | 'inline' | 'manual';
+  recommendedFix?: string;
+  source?: 'analysis' | 'rule';
   confidence?: 'high' | 'medium' | 'low';
   effort?: string;
   runnerUp?: string;
+  usage?: {
+    filesCount: number;
+    templateUsages: number;
+    importedSymbols: string[];
+    summary: string;
+  };
 }
 
 export interface PeerConflict {

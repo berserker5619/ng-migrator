@@ -70,6 +70,7 @@ export async function createPlan(options: PlanOptions): Promise<Plan> {
       rules: await loadRules(config.rules, project.root),
       alternatesAllow: config.alternates.allow,
       alternatesDeny: config.alternates.deny,
+      unmaintainedThresholdMonths: config.unmaintainedThresholdMonths,
     });
 
     let resolutionCheck: ResolutionCheck = { status: 'skipped' };

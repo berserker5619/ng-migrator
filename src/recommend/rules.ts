@@ -5,7 +5,7 @@ import builtInRulesJson from '../rules/built-in-rules.json' with { type: 'json' 
 export interface MigrationRule {
   package: string;
   status?: 'deprecated' | 'abandoned' | 'maintained';
-  appliesFrom?: number;
+  lastReleaseFor?: number;
   category?: 'layout' | 'ui' | 'utility' | 'auth' | 'crypto' | 'sdk' | string;
   recommendation?: 'upgrade' | 'alternate' | 'fork' | 'inline' | 'manual';
   alternatives?: string[];

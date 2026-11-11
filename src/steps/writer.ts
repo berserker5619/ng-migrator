@@ -1,10 +1,17 @@
+import { createHash } from 'node:crypto';
 import { mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { Plan, PlannedStep } from '../model.js';
 import { pathExists } from '../platform/fs.js';
 import { writeGeneratedText } from '../platform/text.js';
-import { createState, readState, statePath, writeState, type MigratorState, type StepState } from '../state/state.js';
-import { TOOL_VERSION } from '../version.js';
+import {
+  createState,
+  readState,
+  statePath,
+  writeState,
+  type MigratorState,
+  type StepState,
+} from '../state/state.js';
 
 export interface WritePlanResult {
   stateFile: string;
@@ -12,35 +19,47 @@ export interface WritePlanResult {
   stepFiles: string[];
 }
 
-function padStepNumber(index: number): string {
+export function padStepNumber(index: number): string {
   return String(index).padStart(2, '0');
 }
 
-export function formatStepDocument(step: PlannedStep, stepState?: StepState): string {
+/** Generates a stable decision ID: slug plus short hash (8 hex chars). */
+export function generateDecisionId(packageName: string, category: string = 'blocker'): string {
+  const slug = packageName
+    .replace(/^@/, '')
+    .replace(/[/._]/g, '-')
+    .toLowerCase();
+  const hash = createHash('sha256').update(packageName).digest('hex').slice(0, 8);
+  return `${category}-${slug}-${hash}`;
+}
+
+export function formatStepDocument(
+  step: PlannedStep,
+  stepState?: StepState,
+  hasNodeModules: boolean = true,
+): string {
   const lines: string[] = [];
   const status = stepState?.status ?? 'planned';
-  const provisionalTag = step.provisional ? ' (provisional)' : '';
+  const provisionalSuffix = step.provisional ? ' (provisional)' : '';
 
-  lines.push(`# Step ${step.index}: Angular ${step.from} to ${step.to}${provisionalTag}`);
+  lines.push(`# Step ${step.index}: Angular ${step.from} to ${step.to}${provisionalSuffix}`);
   lines.push('');
-  lines.push(`Status: ${status} | Tool: ${TOOL_VERSION}`);
+  lines.push(`Status: ${status} | Tool: 1.0.0`);
   lines.push('');
 
   lines.push('## Requirements');
-  lines.push(`- Node: ${step.requirements.node ?? 'any'}`);
-  lines.push(`- TypeScript: ${step.requirements.typescript ?? 'per Angular requirements'}`);
-  lines.push(`- RxJS: ${step.requirements.rxjs ?? 'per Angular requirements'}`);
-  lines.push(`- zone.js: ${step.requirements.zone ?? 'per Angular requirements'}`);
-  if (step.requirements.notes.length > 0) {
-    for (const note of step.requirements.notes) {
-      lines.push(`- Note: ${note}`);
-    }
+  if (step.requirements.node) lines.push(`- Node: ${step.requirements.node}`);
+  if (step.requirements.typescript) lines.push(`- TypeScript: ${step.requirements.typescript}`);
+  if (step.requirements.rxjs) lines.push(`- RxJS: ${step.requirements.rxjs}`);
+  if (step.requirements.zone) lines.push(`- zone.js: ${step.requirements.zone}`);
+  for (const n of step.requirements.notes) {
+    lines.push(`- Note: ${n}`);
   }
   lines.push('');
 
   lines.push('## Manifest changes (package.json preview)');
   if (step.changes.length === 0) {
-    lines.push('_No package updates required._');
+    lines.push('_No direct package updates required._');
   } else {
     for (const c of step.changes) {
       lines.push(`- "${c.name}": "${c.currentSpec}"`);
@@ -56,8 +75,12 @@ export function formatStepDocument(step: PlannedStep, stepState?: StepState): st
     lines.push('| Package | Current | Target | Reason | Evidence |');
     lines.push('|---|---|---|---|---|');
     for (const c of step.changes) {
-      const cur = c.current ?? c.currentSpec;
-      lines.push(`| ${c.name} | ${cur} | ${c.target} | ${c.reason} | ${c.evidence} |`);
+      let cur = c.current ?? c.currentSpec;
+      if (!hasNodeModules && !c.current) {
+        cur = `${c.currentSpec} (installed version unknown, lockfile used)`;
+      }
+      const evidenceLabel = c.evidence === 'verified' ? 'verified by build' : 'declared compatible';
+      lines.push(`| ${c.name} | ${cur} | ${c.target} | ${c.reason} | ${evidenceLabel} |`);
     }
   }
   lines.push('');
@@ -77,15 +100,35 @@ export function formatStepDocument(step: PlannedStep, stepState?: StepState): st
     lines.push('None detected.');
   } else {
     for (const b of step.blockers) {
-      lines.push(`### ${b.package} (${b.reason})`);
-      if (b.recommendation) {
-        lines.push(`- Recommendation: ${b.recommendation} (confidence: ${b.confidence ?? 'medium'})`);
+      const typeLabel = b.hard ? '' : ' [soft / unmaintained]';
+      lines.push(`### ${b.package} (${b.reason})${typeLabel}`);
+      if (b.recommendedFix) {
+        lines.push(`- Recommended fix: ${b.recommendedFix}`);
+      } else if (b.recommendation) {
+        lines.push(`- Recommended fix: ${b.recommendation}`);
       }
-      lines.push(`- Details: ${b.details}`);
-      if (b.effort) lines.push(`- Estimated effort: ${b.effort}`);
-      if (b.runnerUp) lines.push(`- Runner-up: ${b.runnerUp}`);
-      if (b.current) lines.push(`- Current version: ${b.current}`);
-      if (b.lastCompatible) lines.push(`- Last compatible release: ${b.lastCompatible}`);
+      if (b.source) {
+        lines.push(`- Source: ${b.source}`);
+      }
+      if (b.confidence) {
+        lines.push(`- Confidence: ${b.confidence}`);
+      }
+      lines.push(`- Reasoning: ${b.details}`);
+      if (b.effort) {
+        lines.push(`- Estimated effort: ${b.effort}`);
+      }
+      if (b.runnerUp) {
+        lines.push(`- Runner-up: ${b.runnerUp}`);
+      }
+      if (b.usage) {
+        lines.push(`- Usage footprint: ${b.usage.summary}`);
+      }
+      if (b.current) {
+        lines.push(`- Current version: ${b.current}`);
+      }
+      if (b.lastCompatible) {
+        lines.push(`- Last compatible release: ${b.lastCompatible}`);
+      }
       lines.push('');
     }
   }
@@ -103,14 +146,23 @@ export function formatStepDocument(step: PlannedStep, stepState?: StepState): st
 
   lines.push('## Decisions needed');
   if (step.blockers.length === 0) {
-    lines.push('- [ ] Confirm ready to proceed');
+    const confirmId = 'confirm-ready-to-proceed';
+    const checked = stepState?.decisions[confirmId] ? 'x' : ' ';
+    lines.push(`- [${checked}] Confirm ready to proceed <!-- id: ${confirmId} -->`);
   } else {
     for (const b of step.blockers) {
-      const decisionKey = `blocker-${b.package}`;
-      const checked = stepState?.decisions[decisionKey] ? 'x' : ' ';
-      lines.push(`- [${checked}] Decide resolution for ${b.package} (${b.reason}) <!-- id: ${decisionKey} -->`);
+      const stableId = generateDecisionId(b.package, 'blocker');
+      const legacyId = `blocker-${b.package}`;
+      const checked = (stepState?.decisions[stableId] ?? stepState?.decisions[legacyId]) ? 'x' : ' ';
+      lines.push(`- [${checked}] Decide resolution for ${b.package} (${b.reason}) <!-- id: ${stableId} -->`);
     }
   }
+  lines.push('');
+
+  lines.push('## Reviewer notes');
+  lines.push('<!-- reviewer-notes: start -->');
+  lines.push(stepState?.reviewerNotes ? stepState.reviewerNotes : '(Optional reviewer notes)');
+  lines.push('<!-- reviewer-notes: end -->');
   lines.push('');
 
   lines.push('## Approval');
@@ -162,28 +214,58 @@ export function formatSummary(plan: Plan, state: MigratorState): string {
   return lines.join('\n');
 }
 
-/** Parses existing ticked decisions from a step document file if it exists. */
-export async function extractDecisionsFromFile(filePath: string): Promise<Record<string, boolean>> {
+/**
+ * Parses existing ticked decisions and reviewer notes from a step document file.
+ * Handles both new stable IDs and legacy blocker-<pkg> IDs.
+ */
+export async function extractDecisionsFromFile(filePath: string): Promise<{
+  decisions: Record<string, boolean>;
+  reviewerNotes?: string;
+}> {
   const decisions: Record<string, boolean> = {};
-  if (!(await pathExists(filePath))) return decisions;
+  let reviewerNotes: string | undefined;
+
+  if (!(await pathExists(filePath))) return { decisions };
 
   try {
     const text = await readFile(filePath, 'utf8');
+
+    // 1. Parse decision checkboxes
     const regex = /- \[([ xX])\] (.*?)<!-- id: ([^\s>]+) -->/g;
     let match;
     while ((match = regex.exec(text)) !== null) {
       const isChecked = match[1]?.toLowerCase() === 'x';
       const id = match[3]!;
       decisions[id] = isChecked;
+
+      // Migration: If this was a legacy blocker-<pkg> ID, also map to the stable generated ID
+      if (id.startsWith('blocker-')) {
+        const legacyPkg = id.slice('blocker-'.length);
+        const stableId = generateDecisionId(legacyPkg, 'blocker');
+        decisions[stableId] = isChecked;
+      }
+    }
+
+    // 2. Parse reviewer notes between markers
+    const notesMatch = /<!-- reviewer-notes: start -->\s*([\s\S]*?)\s*<!-- reviewer-notes: end -->/.exec(text);
+    if (notesMatch && notesMatch[1]) {
+      const candidateNotes = notesMatch[1].trim();
+      if (candidateNotes !== '(Optional reviewer notes)' && candidateNotes !== '') {
+        reviewerNotes = candidateNotes;
+      }
     }
   } catch {
     // ignore
   }
 
-  return decisions;
+  return { decisions, reviewerNotes };
 }
 
-export async function writePlanDocuments(root: string, plan: Plan): Promise<WritePlanResult> {
+export async function writePlanDocuments(
+  root: string,
+  plan: Plan,
+  hasNodeModules: boolean = true,
+): Promise<WritePlanResult> {
   const baseDir = path.join(root, '.ng-migrator');
   const stepsDir = path.join(baseDir, 'steps');
   await mkdir(stepsDir, { recursive: true });
@@ -202,7 +284,8 @@ export async function writePlanDocuments(root: string, plan: Plan): Promise<Writ
 
     // Find existing step state or initialize
     let stepState = state.steps.find((s) => s.index === step.index);
-    const existingDecisions = await extractDecisionsFromFile(fullPath);
+    const { decisions: existingDecisions, reviewerNotes: existingNotes } =
+      await extractDecisionsFromFile(fullPath);
 
     if (!stepState) {
       stepState = {
@@ -213,14 +296,18 @@ export async function writePlanDocuments(root: string, plan: Plan): Promise<Writ
         files: { created: [], changed: [], deleted: [] },
         verification: [],
         decisions: existingDecisions,
+        reviewerNotes: existingNotes,
       };
       state.steps.push(stepState);
     } else {
-      // Merge decisions preserving user input
+      // Merge decisions and reviewer notes preserving user input
       stepState.decisions = { ...stepState.decisions, ...existingDecisions };
+      if (existingNotes) {
+        stepState.reviewerNotes = existingNotes;
+      }
     }
 
-    const docContent = formatStepDocument(step, stepState);
+    const docContent = formatStepDocument(step, stepState, hasNodeModules);
     await writeGeneratedText(fullPath, docContent);
     stepFiles.push(fullPath);
   }

@@ -160,6 +160,7 @@ export function createProgram(io: CliIo, getOutput: () => Output): Command {
         rules,
         alternatesAllow: config.alternates.allow,
         alternatesDeny: config.alternates.deny,
+        unmaintainedThresholdMonths: config.unmaintainedThresholdMonths,
       });
 
       out.info(`Dependencies analyzed: ${project.dependencies.length}`);
@@ -250,7 +251,7 @@ export function createProgram(io: CliIo, getOutput: () => Output): Command {
           verifyResolution: !opts.offline,
         });
 
-        await writePlanDocuments(io.cwd, plan);
+        await writePlanDocuments(io.cwd, plan, project.hasNodeModules);
 
         out.success(`\nPlan generated successfully (${plan.steps.length} step(s)):`);
         for (const s of plan.steps) {
@@ -318,9 +319,12 @@ export function createProgram(io: CliIo, getOutput: () => Output): Command {
 
         const stepFileName = `${String(step.index).padStart(2, '0')}-angular-${step.from}-to-${step.to}.md`;
         const stepFilePath = path.join(io.cwd, '.ng-migrator', 'steps', stepFileName);
-        const decisions = await extractDecisionsFromFile(stepFilePath);
+        const { decisions, reviewerNotes } = await extractDecisionsFromFile(stepFilePath);
 
         step.decisions = { ...step.decisions, ...decisions };
+        if (reviewerNotes) {
+          step.reviewerNotes = reviewerNotes;
+        }
         const openDecisions = Object.entries(step.decisions).filter(([, checked]) => !checked);
         if (openDecisions.length > 0) {
           out.warn(`Step ${stepIndex} has ${openDecisions.length} open decision(s) in ${stepFileName}.`);

@@ -12,6 +12,7 @@ export interface VersionMeta {
   peerDependenciesMeta?: Record<string, { optional?: boolean }>;
   engines?: { node?: string };
   deprecated?: string;
+  releaseDate?: string;
 }
 
 export interface Packument {
@@ -19,6 +20,7 @@ export interface Packument {
   distTags: Record<string, string>;
   versions: Record<string, VersionMeta>;
   modified?: string;
+  time?: Record<string, string>;
 }
 
 interface CacheEntry {
@@ -51,12 +53,14 @@ const CORGI = 'application/vnd.npm.install-v1+json; q=1.0, application/json; q=0
 
 function trim(raw: Record<string, unknown>): Packument {
   const versions: Record<string, VersionMeta> = {};
+  const time = (raw.time ?? {}) as Record<string, string>;
   for (const [v, meta] of Object.entries((raw.versions ?? {}) as Record<string, Record<string, unknown>>)) {
     const m: VersionMeta = { version: v };
     if (meta.peerDependencies) m.peerDependencies = meta.peerDependencies as Record<string, string>;
     if (meta.peerDependenciesMeta) m.peerDependenciesMeta = meta.peerDependenciesMeta as VersionMeta['peerDependenciesMeta'];
     if (meta.engines && typeof (meta.engines as { node?: unknown }).node === 'string') m.engines = { node: (meta.engines as { node: string }).node };
     if (typeof meta.deprecated === 'string' && meta.deprecated !== '') m.deprecated = meta.deprecated;
+    if (typeof time[v] === 'string') m.releaseDate = time[v];
     versions[v] = m;
   }
   return {
@@ -64,6 +68,7 @@ function trim(raw: Record<string, unknown>): Packument {
     distTags: (raw['dist-tags'] ?? {}) as Record<string, string>,
     versions,
     ...(typeof raw.modified === 'string' ? { modified: raw.modified } : {}),
+    ...(Object.keys(time).length > 0 ? { time } : {}),
   };
 }
 
@@ -178,6 +183,13 @@ export class RegistryClient {
 export function stableVersionsDesc(p: Packument): string[] {
   return Object.keys(p.versions)
     .filter((v) => semver.valid(v) && semver.prerelease(v) === null)
+    .sort(semver.rcompare);
+}
+
+/** All valid releases (including prereleases), newest first. */
+export function allVersionsDesc(p: Packument): string[] {
+  return Object.keys(p.versions)
+    .filter((v) => semver.valid(v) !== null)
     .sort(semver.rcompare);
 }
 

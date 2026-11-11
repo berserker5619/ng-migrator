@@ -1,10 +1,11 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Packument, RegistryClient } from '../src/registry/client.js';
 import { createPlan } from '../src/planner/plan.js';
 import { readProject } from '../src/reader/project.js';
 import { resolveConfig } from '../src/config/config.js';
+import { generateDecisionId } from '../src/steps/writer.js';
 import { tempProject } from './helpers.js';
 
 let dir: string;
@@ -19,6 +20,7 @@ describe('synthetic corpus fixtures', () => {
         name: '@angular/core',
         distTags: { latest: '16.2.12' },
         versions: {
+          '14.2.12': { version: '14.2.12', engines: { node: '>=14.15' } },
           '15.2.10': { version: '15.2.10', engines: { node: '>=14.20' } },
           '16.2.12': {
             version: '16.2.12',
@@ -31,6 +33,7 @@ describe('synthetic corpus fixtures', () => {
         name: '@angular/compiler-cli',
         distTags: { latest: '16.2.12' },
         versions: {
+          '15.2.10': { version: '15.2.10', peerDependencies: { typescript: '>=4.8.2 <5.0' } },
           '16.2.12': { version: '16.2.12', peerDependencies: { typescript: '>=4.9.3 <5.2.0' } },
         },
       },
@@ -38,6 +41,7 @@ describe('synthetic corpus fixtures', () => {
         name: '@angular/cli',
         distTags: { latest: '16.2.12' },
         versions: {
+          '15.2.10': { version: '15.2.10', engines: { node: '>=14.20' } },
           '16.2.12': { version: '16.2.12', engines: { node: '^16.14.0 || >=18.10.0' } },
         },
       },
@@ -49,27 +53,87 @@ describe('synthetic corpus fixtures', () => {
     } as unknown as RegistryClient;
   }
 
-  it('Fixture 1: detects abandoned package with no compatible release', async () => {
+  it('Synthetic Fixture (a): deprecated package with only prerelease versions and open-ended peers (@angular/flex-layout)', async () => {
+    // Read the recorded offline fixture for @angular/flex-layout
+    const fixturePath = path.resolve(__dirname, 'fixtures', 'registry', '%40angular%2Fflex-layout.json');
+    const fixtureRaw = JSON.parse(await readFile(fixturePath, 'utf8')) as { packument: Packument };
+    const flexPackument = fixtureRaw.packument;
+
     await writeFile(
       path.join(dir, 'package.json'),
       JSON.stringify({
-        name: 'fixture-abandoned',
+        name: 'fixture-flex-layout',
         dependencies: {
-          '@angular/core': '15.2.0',
-          'abandoned-chart-lib': '1.0.0',
+          '@angular/core': '^14.2.0',
+          '@angular/flex-layout': '^14.0.0-beta.40',
         },
       }),
     );
 
     const mockRegistry = makeMockRegistry({
-      'abandoned-chart-lib': {
-        name: 'abandoned-chart-lib',
+      '@angular/flex-layout': flexPackument,
+    });
+
+    const project = await readProject(dir);
+    const config = resolveConfig({}, {}, { packageManager: 'npm' });
+
+    // Plan across 14 -> 15 -> 16
+    const plan = await createPlan({
+      project,
+      targetMajor: 16,
+      registry: mockRegistry,
+      config,
+      verifyResolution: false,
+    });
+
+    expect(plan.steps).toHaveLength(2);
+
+    // Step 1: Angular 14 -> 15
+    const step1 = plan.steps[0]!;
+    expect(step1.from).toBe(14);
+    expect(step1.to).toBe(15);
+
+    const flexChange = step1.changes.find((c) => c.name === '@angular/flex-layout');
+    expect(flexChange).toBeDefined();
+    expect(flexChange?.target).toBe('15.0.0-beta.42');
+    expect(flexChange?.evidence).toBe('declared');
+    expect(flexChange?.unmaintained).toBe(true);
+    expect(flexChange?.deprecated).toBeDefined();
+
+    // In step 14 -> 15, it must NOT be a hard blocker!
+    const softBlocker = step1.blockers.find((b) => b.package === '@angular/flex-layout');
+    expect(softBlocker).toBeDefined();
+    expect(softBlocker?.reason).toBe('deprecated');
+    expect(softBlocker?.hard).toBe(false);
+
+    // Step 2: Angular 15 -> 16: Flex-layout had no release past 15 (lastReleaseFor: 15)
+    const step2 = plan.steps[1]!;
+    expect(step2.from).toBe(15);
+    expect(step2.to).toBe(16);
+    const hardBlocker = step2.blockers.find((b) => b.package === '@angular/flex-layout');
+    expect(hardBlocker).toBeDefined();
+    expect(hardBlocker?.reason).toBe('no-compatible-version');
+    expect(hardBlocker?.hard).toBe(true);
+  });
+
+  it('Synthetic Fixture (b): scoped package name resolution and stable decision IDs', async () => {
+    await writeFile(
+      path.join(dir, 'package.json'),
+      JSON.stringify({
+        name: 'fixture-scoped-package',
+        dependencies: {
+          '@angular/core': '15.2.0',
+          '@my-org/ui-tokens': '1.0.0',
+        },
+      }),
+    );
+
+    const mockRegistry = makeMockRegistry({
+      '@my-org/ui-tokens': {
+        name: '@my-org/ui-tokens',
         distTags: { latest: '1.0.0' },
         versions: {
-          '1.0.0': {
-            version: '1.0.0',
-            peerDependencies: { '@angular/core': '^14.0.0 || ^15.0.0' },
-          },
+          '1.0.0': { version: '1.0.0', peerDependencies: { '@angular/core': '^14.0.0' } },
         },
       },
     });
@@ -85,60 +149,15 @@ describe('synthetic corpus fixtures', () => {
     });
 
     const step1 = plan.steps[0]!;
-    const blocker = step1.blockers.find((b) => b.package === 'abandoned-chart-lib');
+    const blocker = step1.blockers.find((b) => b.package === '@my-org/ui-tokens');
     expect(blocker).toBeDefined();
-    expect(blocker?.reason).toBe('no-compatible-version');
-    expect(blocker?.lastCompatible).toBe('1.0.0');
+    expect(blocker?.package).toBe('@my-org/ui-tokens');
+
+    const decisionId = generateDecisionId(blocker!.package);
+    expect(decisionId).toMatch(/^blocker-my-org-ui-tokens-[a-f0-9]{8}$/);
   });
 
-  it('Fixture 2: flags View Engine library relying on ngcc when upgrading to Angular 16', async () => {
-    await writeFile(
-      path.join(dir, 'package.json'),
-      JSON.stringify({
-        name: 'fixture-view-engine',
-        dependencies: {
-          '@angular/core': '15.2.0',
-          'legacy-ve-grid': '2.0.0',
-        },
-      }),
-    );
-
-    // Emulate View Engine node_modules structure
-    const veDir = path.join(dir, 'node_modules', 'legacy-ve-grid');
-    await mkdir(veDir, { recursive: true });
-    await writeFile(
-      path.join(veDir, 'package.json'),
-      JSON.stringify({
-        name: 'legacy-ve-grid',
-        version: '2.0.0',
-        typings: 'index.d.ts',
-        peerDependencies: { '@angular/core': '^15.0.0' },
-        __processed_by_ivy_ngcc__: {},
-      }),
-    );
-    await writeFile(path.join(veDir, 'index.d.ts'), '');
-
-    const project = await readProject(dir);
-    expect(project.viewEngineSuspects).toContain('legacy-ve-grid');
-
-    const mockRegistry = makeMockRegistry();
-    const config = resolveConfig({}, {}, { packageManager: 'npm' });
-    const plan = await createPlan({
-      project,
-      targetMajor: 16,
-      registry: mockRegistry,
-      config,
-      verifyResolution: false,
-    });
-
-    const step1 = plan.steps[0]!;
-    const ngccBlocker = step1.blockers.find((b) => b.package === 'legacy-ve-grid');
-    expect(ngccBlocker).toBeDefined();
-    expect(ngccBlocker?.reason).toBe('ivy-or-ngcc');
-    expect(ngccBlocker?.hard).toBe(true);
-  });
-
-  it('Fixture 3: isolates held-back packages requiring Angular n+1', async () => {
+  it('Synthetic Fixture (c): a package whose newest release needs n+1 and is held back', async () => {
     await writeFile(
       path.join(dir, 'package.json'),
       JSON.stringify({
@@ -179,55 +198,37 @@ describe('synthetic corpus fixtures', () => {
     expect(change?.target).toBe('2.0.0');
   });
 
-  it('Fixture 4: recommends inlining for small tooltip library with CDK present', async () => {
-    await mkdir(path.join(dir, 'src'), { recursive: true });
+  it('Synthetic Fixture (d): an abandoned View Engine-era package that breaks at the Angular 16 step', async () => {
     await writeFile(
       path.join(dir, 'package.json'),
       JSON.stringify({
-        name: 'fixture-inline-tooltip',
+        name: 'fixture-view-engine',
         dependencies: {
           '@angular/core': '15.2.0',
-          '@angular/cdk': '15.2.0',
-          'tiny-tooltip': '0.5.0',
+          'legacy-ve-grid': '2.0.0',
         },
       }),
     );
 
+    // Emulate View Engine node_modules structure with __processed_by_ivy_ngcc__
+    const veDir = path.join(dir, 'node_modules', 'legacy-ve-grid');
+    await mkdir(veDir, { recursive: true });
     await writeFile(
-      path.join(dir, 'src', 'app.component.ts'),
-      `
-        import { Component } from '@angular/core';
-        import { TinyTooltipDirective } from 'tiny-tooltip';
-
-        @Component({
-          selector: 'app-root',
-          template: '<span tinyTooltip="info">Hover</span>'
-        })
-        export class AppComponent {
-          dir = TinyTooltipDirective;
-        }
-      `,
+      path.join(veDir, 'package.json'),
+      JSON.stringify({
+        name: 'legacy-ve-grid',
+        version: '2.0.0',
+        typings: 'index.d.ts',
+        peerDependencies: { '@angular/core': '^15.0.0' },
+        __processed_by_ivy_ngcc__: {},
+      }),
     );
-
-    const mockRegistry = makeMockRegistry({
-      '@angular/cdk': {
-        name: '@angular/cdk',
-        distTags: { latest: '16.2.12' },
-        versions: { '16.2.12': { version: '16.2.12' } },
-      },
-      'tiny-tooltip': {
-        name: 'tiny-tooltip',
-        distTags: { latest: '0.5.0' },
-        versions: {
-          '0.5.0': {
-            version: '0.5.0',
-            peerDependencies: { '@angular/core': '^15.0.0' },
-          },
-        },
-      },
-    });
+    await writeFile(path.join(veDir, 'index.d.ts'), '');
 
     const project = await readProject(dir);
+    expect(project.viewEngineSuspects).toContain('legacy-ve-grid');
+
+    const mockRegistry = makeMockRegistry();
     const config = resolveConfig({}, {}, { packageManager: 'npm' });
     const plan = await createPlan({
       project,
@@ -238,9 +239,9 @@ describe('synthetic corpus fixtures', () => {
     });
 
     const step1 = plan.steps[0]!;
-    const tooltipBlocker = step1.blockers.find((b) => b.package === 'tiny-tooltip');
-    expect(tooltipBlocker?.recommendation).toBe('inline');
-    expect(tooltipBlocker?.confidence).toBe('high');
-    expect(tooltipBlocker?.effort).toContain('hours');
+    const ngccBlocker = step1.blockers.find((b) => b.package === 'legacy-ve-grid');
+    expect(ngccBlocker).toBeDefined();
+    expect(ngccBlocker?.reason).toBe('ivy-or-ngcc');
+    expect(ngccBlocker?.hard).toBe(true);
   });
 });

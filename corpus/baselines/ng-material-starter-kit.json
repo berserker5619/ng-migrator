@@ -1,0 +1,42 @@
+{
+  "name": "ng-material-starter-kit",
+  "repository": "https://github.com/Lowgular/ng-material-starter-kit",
+  "commit": "741803635b0fb3a8070a1e09dc503b739538a780",
+  "license": "unknown",
+  "startingAngular": "14.2.2",
+  "targetAngular": 16,
+  "steps": [
+    {
+      "step": 1,
+      "from": 14,
+      "to": 15,
+      "expectedBlockers": [
+        {
+          "package": "@angular/flex-layout",
+          "reason": "deprecated",
+          "hard": false,
+          "evidence": "declared compatible",
+          "unmaintained": true,
+          "expectedRecommendation": "alternate",
+          "recommendedFix": "CSS flexbox/grid",
+          "runnerUp": "Tailwind CSS"
+        }
+      ]
+    },
+    {
+      "step": 2,
+      "from": 15,
+      "to": 16,
+      "expectedBlockers": [
+        {
+          "package": "@angular/flex-layout",
+          "reason": "no-compatible-version",
+          "hard": true,
+          "expectedRecommendation": "alternate",
+          "recommendedFix": "CSS flexbox/grid",
+          "runnerUp": "Tailwind CSS"
+        }
+      ]
+    }
+  ]
+}

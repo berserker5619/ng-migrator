@@ -24,23 +24,31 @@ export function satisfiesAngularPeer(
   peerDeps: Record<string, string> | undefined,
   targetCoreVersion: string,
   targetMajor: number,
+  candidateVersion?: string,
 ): boolean {
   if (!peerDeps) return true;
   const angularPeer = peerDeps['@angular/core'];
   if (!angularPeer) return true;
 
+  const isPrerelease = candidateVersion ? semver.prerelease(candidateVersion) !== null : false;
+  const targetIsPrerelease = semver.prerelease(targetCoreVersion) !== null;
+  const includePrerelease = isPrerelease || targetIsPrerelease;
+
   // Check direct semver satisfaction
-  if (semver.satisfies(targetCoreVersion, angularPeer, { includePrerelease: false })) {
+  if (semver.satisfies(targetCoreVersion, angularPeer, { includePrerelease })) {
     return true;
   }
 
   // Also check if the peer range allows any version in the target major
-  // e.g. "^15.0.0 || ^16.0.0" or ">=15.0.0"
+  // e.g. "^15.0.0 || ^16.0.0" or ">=15.0.0" or ">=15.0.2"
   const minV = semver.minVersion(angularPeer);
   if (minV && minV.major <= targetMajor) {
     // Check if the range overlaps with the major range e.g. ">=16.0.0 <17.0.0-0"
     const majorRange = `>=${targetMajor}.0.0 <${targetMajor + 1}.0.0-0`;
-    if (semver.subset(majorRange, angularPeer) || semver.intersects(angularPeer, majorRange)) {
+    if (
+      semver.subset(majorRange, angularPeer, { includePrerelease }) ||
+      semver.intersects(angularPeer, majorRange, { includePrerelease })
+    ) {
       return true;
     }
   }
