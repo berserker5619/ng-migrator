@@ -55,7 +55,7 @@ ng-migrator --project ./path/to/app --as-of 2026-11-01 plan --to 19
 
 ## Current Limits (Read-Only Planner)
 
-- **Read-only planning only (`0.1.0` / `1.x` scope):** `ng-migrator` analyzes dependencies, verifies peer ranges, scans codebase usage footprints, writes `.ng-migrator/steps/*.md` and `.ng-migrator/summary.md`, and records human approval via `ng-migrator approve <step>`.
+- **Read-only planning only (`1.x` scope):** `ng-migrator` analyzes dependencies, verifies peer ranges, scans codebase usage footprints, writes `.ng-migrator/steps/*.md` and `.ng-migrator/summary.md`, and records human approval via `ng-migrator approve <step>`.
 - **No `migrate` executor yet:** There is no `migrate` command or automated code/manifest executor in the current CLI. Step documents provide a `package.json` diff preview and actionable blocker resolutions for you to apply and review.
 - **`commandPrefix` configuration:** `ng-migrator.config.json` accepts an optional `commandPrefix` (a string or per-major map, such as `"fnm exec --using 16 --"`). It is validated and documented now, and reserved for use when the step executor is introduced.
 

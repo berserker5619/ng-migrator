@@ -25,9 +25,9 @@ function io(overrides: Partial<CliIo> = {}) {
 describe('cli', () => {
   it('prints the version', async () => {
     const t = io();
-    expect(TOOL_VERSION).toBe('0.1.0');
+    expect(TOOL_VERSION).toBe('1.1.0');
     expect(await runCli(['--version'], t.value)).toBe(ExitCode.Success);
-    expect(t.out().trim()).toBe('0.1.0');
+    expect(t.out().trim()).toBe('1.1.0');
   });
 
   it('lists the 1.0 commands in help and rejects migrate', async () => {

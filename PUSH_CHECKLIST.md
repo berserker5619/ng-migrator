@@ -45,11 +45,11 @@ A complete audit of all tracked files confirms:
 To trigger GitHub Actions CI without pushing directly to `main`, push to a feature branch:
 
 ```bash
-# 1. Ensure you are on a branch (e.g., prepare-v0.1.0)
-git checkout -b prepare-v0.1.0
+# 1. Ensure you are on a branch (e.g., prepare-v1.1.0)
+git checkout -b prepare-v1.1.0
 
 # 2. Push the branch to origin
-git push -u origin prepare-v0.1.0
+git push -u origin prepare-v1.1.0
 ```
 
 Once pushed, open a Pull Request against `main` on GitHub to trigger the CI workflow.
@@ -71,4 +71,4 @@ When the CI workflow runs on GitHub (`.github/workflows/ci.yml`), verify:
    - `npm run build` bundles `dist/cli.js` via `tsup` targeting `node22`.
    - `npm test` runs all 151 Vitest tests across 17 test suites and passes.
 4. **Tarball Install Smoke Test:**
-   - The final smoke step creates a fresh temp directory, runs `npm pack`, installs the `.tgz` package into an isolated consumer project, and verifies `npx ng-migrator --version` outputs `0.1.0` and `npx ng-migrator --help` succeeds without missing dependencies.
+   - The final smoke step creates a fresh temp directory, runs `npm pack`, installs the `.tgz` package into an isolated consumer project, and verifies `npx ng-migrator --version` outputs `1.1.0` and `npx ng-migrator --help` succeeds without missing dependencies.

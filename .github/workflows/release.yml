@@ -5,6 +5,15 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      npm_tag:
+        description: 'npm dist-tag to publish to (default: next; set to latest for stable)'
+        required: true
+        default: 'next'
+        type: choice
+        options:
+          - next
+          - latest
 
 permissions:
   contents: write
@@ -35,6 +44,20 @@ jobs:
       - name: Verify build, lint, and tests
         run: npm run check
 
+      - name: Guard against duplicate publish and determine npm dist-tag
+        id: prep
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          echo "Package version in manifest: $PKG_VERSION"
+          if npm view "ng-migrator@$PKG_VERSION" version --json >/dev/null 2>&1; then
+            echo "::error::Version $PKG_VERSION is already published on npm! Bump version before releasing."
+            exit 1
+          fi
+          # Default to 'next' tag unless workflow_dispatch explicitly chose 'latest'
+          DIST_TAG="${{ github.event.inputs.npm_tag || 'next' }}"
+          echo "publish_tag=$DIST_TAG" >> "$GITHUB_OUTPUT"
+          echo "Publishing ng-migrator@$PKG_VERSION with dist-tag: $DIST_TAG"
+
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
@@ -57,8 +80,8 @@ jobs:
           if [ -n "${{ secrets.NPM_TOKEN }}" ]; then
             echo "Publishing via NPM_TOKEN..."
             echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" >> ~/.npmrc
-            npm publish --access public
+            npm publish --access public --tag "${{ steps.prep.outputs.publish_tag }}"
           else
             echo "Publishing via OIDC Trusted Publishing with provenance..."
-            npm publish --provenance --access public
+            npm publish --provenance --access public --tag "${{ steps.prep.outputs.publish_tag }}"
           fi

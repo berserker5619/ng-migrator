@@ -7,9 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [0.1.0] - 2026-11-11
+## [1.1.0] - 2026-11-11
 
-Initial pre-1.0 release of `ng-migrator` (read-only upgrade planner).
+- Added global `--project <path>` option to `doctor`, `analyze`, `plan`, `status`, and `approve`.
+- Added `--as-of <date>` option for time-independent reproducibility and unmaintained dependency threshold checks.
+- Added support for Yarn Classic (`1.x`) and Yarn Berry (`2+`) resolution checks, lockfile pruning, and configurable timeout.
+- Added peer conflict detection and warnings parser for pnpm and yarn, harmonized with npm ERESOLVE.
+- Added `analyze --fail-on-blockers` (exit code 4 on hard blockers).
+- Added `--no-optional-locks` Git process safety guard and byte-identical `.git/index` verification.
+- Added exact GitHub heading anchor slugs for error links to `docs/troubleshooting.md`.
+- Excluded unneeded source maps from published package tarball to minimize package size.
+
+## [1.0.0] - 2026-11-11
+
+- Initial release of `ng-migrator` upgrade planner CLI.
 
 ### Added
 

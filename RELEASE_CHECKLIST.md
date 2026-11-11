@@ -1,8 +1,8 @@
-# Release Checklist (`0.1.0`)
+# Release Checklist (`1.1.0`)
 
 ## 1. Package Name Check
-- **Status:** `pending` (decided by repository owner before pushing/publishing).
-- **Current working name in `package.json`:** `ng-migrator` (`0.1.0`).
+- **Status:** `complete` (confirmed on npm: `ng-migrator`).
+- **Current version in `package.json`:** `1.1.0`.
 - **Action before publishing:** Confirm final package name (`ng-migrator` or scoped name) and update `package.json`, `README.md`, and npm Trusted Publisher settings if changed.
 
 ## 2. License File (`LICENSE`)
@@ -16,51 +16,45 @@
 
 ## 4. Changelog (`CHANGELOG.md`)
 - **Status:** `complete` — [`CHANGELOG.md`](./CHANGELOG.md).
-- **Covers:** `0.1.0` initial read-only release (`doctor`, `analyze`, `plan`, `status`, `approve`), safety guarantees, multi-package-manager peer conflict parsing (`npm`, `pnpm`, `yarn` Classic `1.x` and Berry `2+`), `--project <path>`, `--as-of <date>`, and `NGM-*` troubleshooting documentation.
+- **Covers:** `1.1.0` release (`doctor`, `analyze`, `plan`, `status`, `approve`), safety guarantees, multi-package-manager peer conflict parsing (`npm`, `pnpm`, `yarn` Classic `1.x` and Berry `2+`), `--project <path>`, `--as-of <date>`, and `NGM-*` troubleshooting documentation.
 
 ## 5. `npm pack` Contents Check
 Verified with `npm pack --dry-run`:
 
 ```text
 npm notice
-npm notice package: ng-migrator@0.1.0
+npm notice package: ng-migrator@1.1.0
 npm notice Tarball Contents
-npm notice 3.3kB CHANGELOG.md
+npm notice 3.9kB CHANGELOG.md
 npm notice 1.1kB LICENSE
-npm notice 5.8kB README.md
-npm notice 135.0kB dist/cli.js
+npm notice 6.5kB README.md
+npm notice 135.9kB dist/cli.js
 npm notice 1.4kB package.json
 npm notice Tarball Details
 npm notice name: ng-migrator
-npm notice version: 0.1.0
-npm notice filename: ng-migrator-0.1.0.tgz
-npm notice package size: 39.5 kB
-npm notice unpacked size: 146.6 kB
+npm notice version: 1.1.0
+npm notice filename: ng-migrator-1.1.0.tgz
+npm notice package size: 40.5 kB
+npm notice unpacked size: 148.8 kB
 npm notice total files: 5
 ```
 
-- **Source maps decision:** Excluded from the published npm package (`sourcemap: false` in `tsup.config.ts`). Shipping `dist/cli.js.map` increased the unpacked tarball size from **146.6 kB to 416.6 kB** (+184%) and the packed tarball from **39.5 kB to 104.4 kB** (+164%) without benefit for an executable Node CLI, as TypeScript source files are not shipped in the tarball. Stack traces in Node 22+ still include file names, line numbers, and error IDs.
+- **Source maps decision:** Excluded from the published npm package (`sourcemap: false` in `tsup.config.ts`).
 - Only `dist/`, `README.md`, `CHANGELOG.md`, `LICENSE`, and `package.json` are included (`"files": ["dist"]` in `package.json`).
 - No `test/`, `corpus/`, `src/`, or `.ng-migrator/` artifacts are leaked into the published tarball.
 
 ## 6. Fresh-Machine Install Test (Windows, macOS, Linux)
 - **Windows (verified locally on Windows / Node `v24.19.0`):**
-  1. Packed `ng-migrator-0.1.0.tgz` via `npm pack` into an isolated OS temp directory.
-  2. Installed into a clean consumer folder (`npm install --no-save --ignore-scripts --no-audit --no-fund ng-migrator-0.1.0.tgz`).
-  3. Verified `ng-migrator --version` (`0.1.0`) and `ng-migrator --help` (lists only `doctor`, `analyze`, `plan`, `status`, `approve`; no `migrate` command).
+  1. Packed `ng-migrator-1.1.0.tgz` via `npm pack` into an isolated OS temp directory.
+  2. Installed into a clean consumer folder (`npm install --no-save --ignore-scripts --no-audit --no-fund ng-migrator-1.1.0.tgz`).
+  3. Verified `ng-migrator --version` (`1.1.0`) and `ng-migrator --help` (lists only `doctor`, `analyze`, `plan`, `status`, `approve`; no `migrate` command).
   4. Removed the temporary directory (`PACK TEMP DIR CLEANED: true`).
 - **macOS (`macos-latest`) and Linux (`ubuntu-latest`) (plus `windows-latest`):**
   - Configured in [`.github/workflows/ci.yml`](./.github/workflows/ci.yml) across `os: [ubuntu-latest, macos-latest, windows-latest]` and `node: [22, 24, 26]`.
-  - To run a fresh-install smoke check on all three OSes in CI upon push, run:
-    ```bash
-    npm pack
-    npm install --global ./ng-migrator-0.1.0.tgz
-    ng-migrator --version
-    ng-migrator --help
-    ```
+  - Runs fresh-install smoke check on all three OSes in CI upon push.
 
 ## 7. Provenance & Trusted Publishing Notes
-- **Workflow:** [`.github/workflows/release.yml`](./.github/workflows/release.yml) triggers on `v*` tags (`v0.1.0`).
+- **Workflow:** [`.github/workflows/release.yml`](./.github/workflows/release.yml) triggers on `v*` tags (`v1.1.0`).
 - **Pinned GitHub Actions:** All workflow actions in `ci.yml`, `nightly.yml`, and `release.yml` are pinned by full 40-character commit SHA with version comments (`actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1`, `actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0`).
 - **OIDC Trusted Publishing & Provenance:**
   - `release.yml` declares `permissions: contents: read, id-token: write`.

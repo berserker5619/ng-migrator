@@ -4,7 +4,8 @@
 
 | Version | Supported | Node.js Runtime |
 |---|---|---|
-| `0.1.x` | Active (`0.x` pre-release) | Node `22`, `24`, `26` (`>=22`) |
+| `1.1.x` | Active | Node `22`, `24`, `26` (`>=22`) |
+| `1.0.x` | Supported | Node `22`, `24`, `26` (`>=22`) |
 
 *(Node 18 and Node 20 are end of life and are not supported.)*
 
