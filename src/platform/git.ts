@@ -8,7 +8,7 @@ export interface GitStatusResult {
 }
 
 export async function checkGitStatus(cwd: string): Promise<GitStatusResult> {
-  const statusRun = await run('git', ['status', '--porcelain'], { cwd });
+  const statusRun = await run('git', ['--no-optional-locks', 'status', '--porcelain'], { cwd });
   if (statusRun.failed) {
     // Not a git repository, or git is not installed
     return {
@@ -23,7 +23,7 @@ export async function checkGitStatus(cwd: string): Promise<GitStatusResult> {
     .map((l) => l.trim())
     .filter((l) => l.length > 0 && !l.endsWith('.ng-migrator') && !l.includes('.ng-migrator/'));
 
-  const headRun = await run('git', ['rev-parse', 'HEAD'], { cwd });
+  const headRun = await run('git', ['--no-optional-locks', 'rev-parse', 'HEAD'], { cwd });
   const headCommit = headRun.exitCode === 0 ? headRun.stdout.trim() : undefined;
 
   return {

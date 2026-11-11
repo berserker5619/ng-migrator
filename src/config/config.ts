@@ -17,6 +17,8 @@ export interface FileConfig {
   verify?: { build?: string; lint?: string; test?: string };
   cacheDir?: string;
   unmaintainedThresholdMonths?: number;
+  /** Timeout in milliseconds for package-manager resolution checks (default: 300000 = 5 minutes). */
+  resolutionTimeoutMs?: number;
   /** One prefix for every step, or a map keyed by the step's target major n. */
   commandPrefix?: string | Record<string, string>;
 }
@@ -41,6 +43,7 @@ export interface ResolvedConfig {
   verify: { build?: string; lint?: string; test?: string };
   cacheDir: string;
   unmaintainedThresholdMonths: number;
+  resolutionTimeoutMs: number;
   commandPrefix: string | Record<string, string> | undefined;
 }
 
@@ -53,6 +56,7 @@ const KNOWN_KEYS = new Set([
   'verify',
   'cacheDir',
   'unmaintainedThresholdMonths',
+  'resolutionTimeoutMs',
   'commandPrefix',
 ]);
 
@@ -115,6 +119,12 @@ export function validateFileConfig(raw: unknown): { config: FileConfig; warnings
     }
     c.unmaintainedThresholdMonths = raw.unmaintainedThresholdMonths;
   }
+  if (raw.resolutionTimeoutMs !== undefined) {
+    if (typeof raw.resolutionTimeoutMs !== 'number' || raw.resolutionTimeoutMs <= 0) {
+      fail('resolutionTimeoutMs', 'a positive number of milliseconds');
+    }
+    c.resolutionTimeoutMs = raw.resolutionTimeoutMs;
+  }
   if (raw.commandPrefix !== undefined) {
     const p = raw.commandPrefix;
     if (typeof p === 'string') c.commandPrefix = p;
@@ -146,6 +156,7 @@ export function resolveConfig(flags: FlagConfig, file: FileConfig, detected: Det
     verify: { ...(file.verify ?? {}) },
     cacheDir: file.cacheDir ?? '.ng-migrator/cache',
     unmaintainedThresholdMonths: file.unmaintainedThresholdMonths ?? 18,
+    resolutionTimeoutMs: file.resolutionTimeoutMs ?? 300_000,
     commandPrefix: file.commandPrefix,
   };
 }

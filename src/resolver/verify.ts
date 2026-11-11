@@ -7,11 +7,80 @@ import type { PackageChange, PeerConflict, ResolutionCheck } from '../model.js';
 import { pathExists, readJsonIfExists, removeWithRetry } from '../platform/fs.js';
 import { run } from '../platform/process.js';
 
+export const DEFAULT_RESOLUTION_TIMEOUT_MS = 300_000;
+
 export interface VerifyResolutionOptions {
   projectRoot: string;
   packageManager: PackageManager;
   changes: PackageChange[];
+  /** Timeout in milliseconds for the resolution subprocess (default: 300000 = 5 minutes). */
+  timeoutMs?: number;
+  /** Optional callback for informational messages (e.g. Yarn classic download estimate). */
+  onNotice?: (message: string) => void;
   onTempDirReady?: (info: { tempDir: string; copiedFiles: string[] }) => void;
+}
+
+/**
+ * Removes lockfile stanzas for the given package names from a Yarn lockfile
+ * so Yarn keeps all unchanged dependencies locked and updates only the changed packages.
+ */
+export function pruneYarnLockEntries(content: string, packageNames: readonly string[]): string {
+  if (packageNames.length === 0) return content;
+  const targets = new Set(packageNames);
+  const lines = content.split(/\r?\n/);
+  const out: string[] = [];
+  let skippingStanza = false;
+
+  const extractPkgName = (descriptor: string): string => {
+    const cleaned = descriptor.trim().replace(/^["']|["']$/g, '');
+    const atIdx = cleaned.startsWith('@') ? cleaned.indexOf('@', 1) : cleaned.indexOf('@');
+    return atIdx > 0 ? cleaned.slice(0, atIdx) : cleaned;
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    if (skippingStanza) {
+      if (line.trim() === '') {
+        skippingStanza = false;
+        continue;
+      }
+      if (/^\s+/.test(line)) {
+        continue;
+      }
+      skippingStanza = false;
+    }
+
+    if (!line.startsWith('#') && !/^\s/.test(line) && line.trimEnd().endsWith(':')) {
+      const headerBody = line.trimEnd().slice(0, -1);
+      if (headerBody !== '__metadata') {
+        const descriptors = headerBody.split(',');
+        if (descriptors.some((d) => targets.has(extractPkgName(d)))) {
+          skippingStanza = true;
+          continue;
+        }
+      }
+    }
+
+    out.push(line);
+  }
+
+  return out.join('\n');
+}
+
+export function formatYarnClassicDownloadEstimate(
+  changedCount: number,
+  totalDirectDeps: number,
+  hasYarnLock: boolean,
+  timeoutMs: number,
+): string {
+  const packagesToFetch = hasYarnLock ? Math.max(changedCount, 1) : Math.max(totalDirectDeps, changedCount, 1);
+  const approxMinMb = Math.max(5, Math.round(packagesToFetch * 1.5));
+  const approxMaxMb = Math.max(15, Math.round(packagesToFetch * 4));
+  const timeoutSec = Math.round(timeoutMs / 1000);
+  const scopeNote = hasYarnLock
+    ? `copied yarn.lock and updating ${changedCount} changed package(s)`
+    : `installing ${totalDirectDeps} direct package(s)`;
+  return `Yarn classic (1.x) has no lockfile-only mode: running isolated install in temp directory with --ignore-scripts (${scopeNote}; estimated download ~${approxMinMb}-${approxMaxMb} MB if uncached, timeout ${timeoutSec}s).`;
 }
 
 /**
@@ -182,7 +251,14 @@ export const parseNpmEresolve = parsePeerConflicts;
 export async function verifyWithPackageManager(
   options: VerifyResolutionOptions,
 ): Promise<ResolutionCheck> {
-  const { projectRoot, packageManager, changes, onTempDirReady } = options;
+  const {
+    projectRoot,
+    packageManager,
+    changes,
+    timeoutMs = DEFAULT_RESOLUTION_TIMEOUT_MS,
+    onNotice,
+    onTempDirReady,
+  } = options;
 
   let tempDir: string | undefined;
   let cleaned = false;
@@ -269,6 +345,15 @@ export async function verifyWithPackageManager(
             }
             await writeFile(dest, `${JSON.stringify(lockJson, null, 2)}\n`).catch(() => undefined);
           }
+        } else if (lockfile === 'yarn.lock' && changes.length > 0) {
+          const rawLock = await readFile(dest, 'utf8').catch(() => undefined);
+          if (rawLock !== undefined) {
+            const pruned = pruneYarnLockEntries(
+              rawLock,
+              changes.map((c) => c.name),
+            );
+            await writeFile(dest, pruned).catch(() => undefined);
+          }
         }
       }
     }
@@ -293,6 +378,7 @@ export async function verifyWithPackageManager(
       '--ignore-scripts',
     ];
     let yarnFlavor: 'classic' | 'berry' | undefined;
+    let downloadEstimateMessage: string | undefined;
 
     if (packageManager === 'pnpm') {
       cmd = 'pnpm';
@@ -311,11 +397,24 @@ export async function verifyWithPackageManager(
         args = ['install', '--mode', 'update-lockfile', '--ignore-scripts'];
       } else {
         args = ['install', '--ignore-scripts', '--non-interactive', '--no-progress'];
+        const totalDirectDeps = Object.keys(deps).length + Object.keys(devDeps).length;
+        const hasYarnLock = copiedFiles.includes('yarn.lock');
+        downloadEstimateMessage = formatYarnClassicDownloadEstimate(
+          changes.length,
+          totalDirectDeps,
+          hasYarnLock,
+          timeoutMs,
+        );
+        onNotice?.(downloadEstimateMessage);
       }
     }
 
     const command = `${cmd} ${args.join(' ')}`;
-    const result = await run(cmd, args, { cwd: tempDir, cancelSignal: abortController.signal });
+    const result = await run(cmd, args, {
+      cwd: tempDir,
+      timeoutMs,
+      cancelSignal: abortController.signal,
+    });
 
     await removeWithRetry(tempDir).catch(() => undefined);
     cleaned = true;
@@ -330,6 +429,9 @@ export async function verifyWithPackageManager(
     const hasWarningLines = /(?:^|\n)\s*(?:npm warn|warn\b|warning\b|➤ YN\d+:)/i.test(fullOutput);
     const extraMeta = {
       ...(yarnFlavor ? { yarnFlavor } : {}),
+      ...(downloadEstimateMessage ? { downloadEstimateMessage } : {}),
+      timeoutMs,
+      ...(result.timedOut ? { timedOut: true } : {}),
       command,
     };
 

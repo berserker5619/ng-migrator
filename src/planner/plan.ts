@@ -14,12 +14,13 @@ export interface PlanOptions {
   registry: RegistryClient;
   config: ResolvedConfig;
   verifyResolution?: boolean;
+  onNotice?: (message: string) => void;
   now?: number;
   clock?: () => Date;
 }
 
 export async function createPlan(options: PlanOptions): Promise<Plan> {
-  const { project, targetMajor, registry, config, verifyResolution = true, now, clock } = options;
+  const { project, targetMajor, registry, config, verifyResolution = true, onNotice, now, clock } = options;
 
   const currentVersion = project.angular.version;
   const currentMajor = project.angular.major;
@@ -84,6 +85,8 @@ export async function createPlan(options: PlanOptions): Promise<Plan> {
         projectRoot: project.root,
         packageManager: config.packageManager,
         changes: stepResolution.changes,
+        timeoutMs: config.resolutionTimeoutMs,
+        ...(onNotice ? { onNotice } : {}),
       });
     }
 

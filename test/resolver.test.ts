@@ -15,6 +15,7 @@ import {
   parseNpmEresolve,
   parsePeerConflicts,
   parseYarnVersionFlavor,
+  pruneYarnLockEntries,
   verifyWithPackageManager,
 } from '../src/resolver/verify.js';
 import { tempProject, writeCacheEntry } from './helpers.js';
@@ -129,6 +130,21 @@ npm error peer @angular/core@"^15.0.0" from @angular/material@15.2.0
         requiredBy: 'ngx-chips@2.2.2',
       },
     ]);
+  });
+
+  it('parses real recorded npm ERESOLVE fixture with and without --strict-peer-deps', async () => {
+    const realEresolveFixture = await readFile(
+      path.resolve(__dirname, 'fixtures', 'resolution', 'npm-eresolve-real.txt'),
+      'utf8',
+    );
+    const conflicts = parsePeerConflicts(realEresolveFixture);
+    expect(conflicts).toHaveLength(1);
+    expect(conflicts[0]).toEqual({
+      peer: '@angular/common',
+      range: '^15.0.0',
+      requiredBy: '@ng-bootstrap/ng-bootstrap@14.2.0',
+      found: '@angular/common@16.2.12',
+    });
   });
 });
 
@@ -410,6 +426,131 @@ npm error peer @angular/core@"^15.0.0" from conflicting-pkg@2.0.0
       } finally {
         await cleanup();
       }
+    }
+  });
+
+  it('handles bundled dependencies (codelyzer case): npm exits 0 while tool check flags hard blocker, and step document contrasts both without saying compatible or verified', async () => {
+    const { dir, cleanup } = await tempProject();
+    try {
+      await writeFile(
+        path.join(dir, 'package.json'),
+        JSON.stringify({
+          name: 'codelyzer-contrast-app',
+          dependencies: {
+            '@angular/core': '^12.2.0',
+            '@angular/compiler': '^12.2.0',
+          },
+          devDependencies: {
+            codelyzer: '^6.0.2',
+          },
+        }),
+      );
+      await writeFile(path.join(dir, 'package-lock.json'), '{"name": "codelyzer-contrast-app", "lockfileVersion": 2}\n');
+
+      await writeCacheEntry(dir, '@angular/core', {
+        name: '@angular/core',
+        distTags: { latest: '13.4.0' },
+        versions: {
+          '12.2.0': { version: '12.2.0' },
+          '13.4.0': { version: '13.4.0' },
+        },
+      });
+      await writeCacheEntry(dir, '@angular/compiler', {
+        name: '@angular/compiler',
+        distTags: { latest: '13.4.0' },
+        versions: {
+          '12.2.0': { version: '12.2.0' },
+          '13.4.0': { version: '13.4.0' },
+        },
+      });
+      await writeCacheEntry(dir, '@angular/compiler-cli', {
+        name: '@angular/compiler-cli',
+        distTags: { latest: '13.4.0' },
+        versions: {
+          '13.4.0': { version: '13.4.0', peerDependencies: { typescript: '>=4.4.2 <4.6' } },
+        },
+      });
+      await writeCacheEntry(dir, '@angular/cli', {
+        name: '@angular/cli',
+        distTags: { latest: '13.4.0' },
+        versions: {
+          '13.4.0': { version: '13.4.0' },
+        },
+      });
+      // Codelyzer bundles @angular/core 9.0.0 in dependencies, but peerDependencies excludes 13 (<13.0.0)
+      await writeCacheEntry(dir, 'codelyzer', {
+        name: 'codelyzer',
+        distTags: { latest: '6.0.2' },
+        versions: {
+          '6.0.2': {
+            version: '6.0.2',
+            dependencies: {
+              '@angular/compiler': '9.0.0',
+              '@angular/core': '9.0.0',
+            },
+            peerDependencies: {
+              '@angular/compiler': '>=2.3.1 <13.0.0',
+              '@angular/core': '>=2.3.1 <13.0.0',
+            },
+          },
+        },
+      });
+
+      // Simulate npm resolving with exitCode 0
+      const spy = vi.spyOn(proc, 'run').mockImplementation(async (cmd, args) => {
+        return {
+          command: `${cmd} ${args.join(' ')}`,
+          exitCode: 0,
+          stdout: 'up to date in 2s',
+          stderr: '',
+          timedOut: false,
+          failed: false,
+        };
+      });
+
+      const project = await readProject(dir);
+      const config = resolveConfig({}, {}, { packageManager: 'npm' });
+      const npmrc = await loadNpmrc(dir, {});
+      const registry = new RegistryClient({
+        npmrc,
+        cacheDir: path.join(dir, '.ng-migrator', 'cache'),
+        offline: true,
+      });
+
+      const plan = await createPlan({
+        project,
+        targetMajor: 13,
+        registry,
+        config,
+        verifyResolution: true,
+        clock: () => new Date('2026-11-01T00:00:00.000Z'),
+      });
+
+      expect(plan.steps).toHaveLength(1);
+      const step1 = plan.steps[0]!;
+
+      // 1. npm exited 0 -> resolution.status is confirmed
+      expect(step1.resolution.status).toBe('confirmed');
+      expect(step1.resolution.packageManager).toBe('npm');
+
+      // 2. Tool's own check flagged codelyzer as hard blocker!
+      const codelyzerBlocker = step1.blockers.find((b) => b.package === 'codelyzer');
+      expect(codelyzerBlocker).toBeDefined();
+      expect(codelyzerBlocker?.hard).toBe(true);
+      expect(codelyzerBlocker?.reason).toBe('no-compatible-version');
+
+      // 3. Step document shows both results side by side with "resolved by npm without errors"
+      const { formatStepDocument } = await import('../src/steps/writer.js');
+      const doc = formatStepDocument(step1);
+      expect(doc).toContain('Resolution check: resolved by npm without errors (without warnings) | Tool peer check: 1 hard blocker(s) (codelyzer).');
+      expect(doc).toContain('- Peer check vs package manager: tool peer check = hard blocker (no-compatible-version); npm check = resolved by npm without errors.');
+      // Never say "compatible" or "verified" for resolution status
+      expect(doc).not.toContain('Resolution check: confirmed compatible');
+      expect(doc).not.toContain('Resolution check: verified');
+
+      spy.mockRestore();
+    } finally {
+      await cleanup();
     }
   });
 });
@@ -716,6 +857,96 @@ describe('Yarn Classic (1.x) vs Berry (2+) detection and verification', () => {
       expect(res.status).toBe('unverified');
       expect(res.yarnFlavor).toBe('classic');
       expect(res.detail).toBe('resolution not verified (yarn classic)');
+      spy.mockRestore();
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('prunes changed package entries from yarn.lock so yarn updates only the changed packages', () => {
+    const sampleYarnLock = `# THIS IS AN AUTOGENERATED FILE. DO NOT EDIT DIRECTLY.
+# yarn lockfile v1
+
+
+"@angular/common@^14.2.0":
+  version "14.3.0"
+  resolved "https://registry.yarnpkg.com/@angular/common/-/common-14.3.0.tgz"
+  dependencies:
+    tslib "^2.3.0"
+
+"@angular/core@^14.2.0":
+  version "14.3.0"
+  resolved "https://registry.yarnpkg.com/@angular/core/-/core-14.3.0.tgz"
+  dependencies:
+    rxjs "^6.5.3 || ^7.4.0"
+    tslib "^2.3.0"
+
+"rxjs@~7.5.0":
+  version "7.5.7"
+  resolved "https://registry.yarnpkg.com/rxjs/-/rxjs-7.5.7.tgz"
+  dependencies:
+    tslib "^2.1.0"
+`;
+
+    const pruned = pruneYarnLockEntries(sampleYarnLock, ['@angular/core']);
+    expect(pruned).not.toContain('@angular/core@^14.2.0');
+    expect(pruned).toContain('@angular/common@^14.2.0');
+    expect(pruned).toContain('rxjs@~7.5.0');
+  });
+
+  it('includes download estimate message and configurable timeout in Yarn classic resolution check', async () => {
+    const { dir, cleanup } = await tempProject();
+    try {
+      await writeFile(
+        path.join(dir, 'package.json'),
+        JSON.stringify({
+          name: 'yarn-classic-timeout-test',
+          dependencies: {
+            '@angular/core': '^14.2.0',
+            rxjs: '~7.5.0',
+          },
+        }),
+      );
+      await writeFile(path.join(dir, 'yarn.lock'), '# yarn lockfile v1\n');
+
+      const notices: string[] = [];
+      let receivedTimeout: number | undefined;
+
+      const spy = vi.spyOn(proc, 'run').mockImplementation(async (cmd, args, opts) => {
+        if (args[0] === '--version') {
+          return { command: `${cmd} ${args.join(' ')}`, exitCode: 0, stdout: '1.22.22\n', stderr: '', timedOut: false, failed: false };
+        }
+        receivedTimeout = opts?.timeoutMs;
+        return { command: `${cmd} ${args.join(' ')}`, exitCode: 0, stdout: 'Done in 2.0s', stderr: '', timedOut: false, failed: false };
+      });
+
+      const res = await verifyWithPackageManager({
+        projectRoot: dir,
+        packageManager: 'yarn',
+        changes: [
+          {
+            name: '@angular/core',
+            type: 'dependencies',
+            current: '14.2.0',
+            currentSpec: '^14.2.0',
+            target: '15.2.10',
+            targetSpec: '^15.2.10',
+            reason: 'upgrade',
+            evidence: 'declared',
+          },
+        ],
+        timeoutMs: 60_000,
+        onNotice: (m) => notices.push(m),
+      });
+
+      expect(res.status).toBe('confirmed');
+      expect(res.yarnFlavor).toBe('classic');
+      expect(receivedTimeout).toBe(60_000);
+      expect(res.timeoutMs).toBe(60_000);
+      expect(res.downloadEstimateMessage).toBeDefined();
+      expect(notices).toHaveLength(1);
+      expect(notices[0]).toContain('Yarn classic (1.x) has no lockfile-only mode');
+      expect(notices[0]).toContain('timeout 60s');
       spy.mockRestore();
     } finally {
       await cleanup();

@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -182,6 +182,82 @@ describe('Safety audit: non-destructive planning guarantees', () => {
     expect(snap.totalOutsideMigratorCount).toBe(4);
     expect(Object.keys(snap.workingTreeHashes).sort()).toEqual(['README.md', 'package.json']);
     expect(Object.keys(snap.gitDirHashes).sort()).toEqual(['.git/HEAD', '.git/refs/heads/main']);
+  });
+
+  it('guarantees .git/index is byte-identical before and after doctor, analyze, and plan', async () => {
+    // Initialize a valid git repository using child_process git init and git add in the temp project
+    const { execFileSync } = await import('node:child_process');
+    execFileSync('git', ['init', dir]);
+
+    await writeFile(
+      path.join(dir, 'package.json'),
+      JSON.stringify(
+        {
+          name: 'git-index-audit-project',
+          version: '1.0.0',
+          dependencies: {
+            '@angular/core': '^15.2.0',
+            rxjs: '~7.5.0',
+          },
+        },
+        null,
+        2,
+      ) + '\n',
+    );
+    await writeFile(path.join(dir, 'app.component.ts'), 'export class AppComponent {}\n');
+
+    execFileSync('git', ['-C', dir, 'add', 'package.json', 'app.component.ts']);
+
+    const indexPath = path.join(dir, '.git', 'index');
+    expect(await pathExists(indexPath)).toBe(true);
+    const indexShaBefore = (await readFile(indexPath)).toString('hex');
+
+    // Run doctor check
+    const project = await readProject(dir);
+    const gitStatus = await processMod.run('git', ['--no-optional-locks', 'status', '--porcelain'], { cwd: dir });
+    expect(gitStatus.exitCode).toBe(0);
+
+    const indexShaAfterDoctor = (await readFile(indexPath)).toString('hex');
+    expect(indexShaAfterDoctor).toBe(indexShaBefore);
+
+    // Run plan
+    const mockRegistry = {
+      packument: async (name: string): Promise<Packument | undefined> => {
+        if (name === '@angular/core') {
+          return {
+            name: '@angular/core',
+            distTags: { latest: '16.2.12' },
+            versions: {
+              '15.2.0': { version: '15.2.0' },
+              '16.2.12': { version: '16.2.12' },
+            },
+          };
+        }
+        if (name === 'rxjs') {
+          return {
+            name: 'rxjs',
+            distTags: { latest: '7.8.2' },
+            versions: {
+              '7.5.0': { version: '7.5.0' },
+              '7.8.2': { version: '7.8.2' },
+            },
+          };
+        }
+        return undefined;
+      },
+    } as unknown as RegistryClient;
+
+    const config = resolveConfig({}, {}, { packageManager: 'npm' });
+    await createPlan({
+      project,
+      targetMajor: 16,
+      registry: mockRegistry,
+      config,
+      verifyResolution: false,
+    });
+
+    const indexShaAfterPlan = (await readFile(indexPath)).toString('hex');
+    expect(indexShaAfterPlan).toBe(indexShaBefore);
   });
 });
 

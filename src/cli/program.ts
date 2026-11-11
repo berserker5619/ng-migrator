@@ -276,6 +276,7 @@ export function createProgram(
           registry,
           config,
           verifyResolution: !opts.offline,
+          onNotice: (msg) => out.info(msg),
           clock,
         });
 
@@ -429,15 +430,19 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     if (err instanceof CommanderError) {
       if (err.exitCode === 0) return ExitCode.Success;
       output.error(`NGM-2001 ${err.message.replace(/^error:\s*/i, '')}`);
+      output.info('  Troubleshooting: https://github.com/berserker5619/ng-migrator/blob/main/docs/troubleshooting.md#ngm-2001');
       return ExitCode.Usage;
     }
     if (isNgmError(err)) {
       output.error(`${err.id} ${err.message}`);
       if (err.hint) output.info(`  ${err.hint}`);
+      const anchor = err.id.toLowerCase();
+      output.info(`  Troubleshooting: https://github.com/berserker5619/ng-migrator/blob/main/docs/troubleshooting.md#${anchor}`);
       return err.exitCode;
     }
     output.error(`NGM-1001 Unexpected error: ${err instanceof Error ? err.message : String(err)}`);
     if (err instanceof Error && err.stack) output.debug(err.stack);
+    output.info('  Troubleshooting: https://github.com/berserker5619/ng-migrator/blob/main/docs/troubleshooting.md#ngm-1001');
     output.info('  Please report this with the output of --verbose.');
     return ExitCode.Unexpected;
   }

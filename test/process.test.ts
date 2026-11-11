@@ -3,9 +3,25 @@ import { NgmError } from '../src/errors.js';
 import { assertAllowedCommand, gitSubcommand, onSpawn, parseCommandPrefix, run } from '../src/platform/process.js';
 
 describe('git guard', () => {
-  it('allows read-only git commands', () => {
-    for (const args of [['status', '--porcelain'], ['rev-parse', 'HEAD'], ['--version'], ['-C', 'some dir', 'status']]) {
+  it('allows read-only git commands when --no-optional-locks is present', () => {
+    for (const args of [
+      ['--no-optional-locks', 'status', '--porcelain'],
+      ['--no-optional-locks', 'rev-parse', 'HEAD'],
+      ['--no-optional-locks', '--version'],
+      ['-C', 'some dir', '--no-optional-locks', 'status'],
+    ]) {
       expect(() => assertAllowedCommand('git', args)).not.toThrow();
+    }
+  });
+
+  it('fails if any git command lacks --no-optional-locks', () => {
+    for (const args of [
+      ['status', '--porcelain'],
+      ['rev-parse', 'HEAD'],
+      ['-C', 'some dir', 'status'],
+      ['status', '--no-optional-locks'], // comes after subcommand
+    ]) {
+      expect(() => assertAllowedCommand('git', args)).toThrow(NgmError);
     }
   });
 

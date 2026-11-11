@@ -119,6 +119,9 @@ export interface ResolutionCheck {
   packageManager?: PackageManager;
   yarnFlavor?: 'classic' | 'berry';
   command?: string;
+  timeoutMs?: number;
+  timedOut?: boolean;
+  downloadEstimateMessage?: string;
   withWarnings?: boolean;
   warnings?: string[];
   detail?: string;

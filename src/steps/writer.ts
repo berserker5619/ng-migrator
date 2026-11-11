@@ -92,7 +92,14 @@ export function formatStepDocument(
       : rawPm;
   const warningsLabel = step.resolution.withWarnings ? 'with warnings' : 'without warnings';
   if (step.resolution.status === 'confirmed') {
-    lines.push(`Resolution check: confirmed by ${pmName} (${warningsLabel}).`);
+    const hardOwnBlockers = step.blockers.filter((b) => b.hard && b.reason !== 'peer-conflict');
+    if (hardOwnBlockers.length > 0) {
+      lines.push(
+        `Resolution check: resolved by ${pmName} without errors (${warningsLabel}) | Tool peer check: ${hardOwnBlockers.length} hard blocker(s) (${hardOwnBlockers.map((b) => b.package).join(', ')}).`,
+      );
+    } else {
+      lines.push(`Resolution check: confirmed by ${pmName} (${warningsLabel}).`);
+    }
   } else if (step.resolution.status === 'conflict') {
     lines.push(`Resolution check: ${pmName} reported peer dependency conflicts (${warningsLabel}).`);
   } else if (step.resolution.status === 'unverified') {
@@ -125,6 +132,11 @@ export function formatStepDocument(
       const typeLabel = b.hard ? '' : ' [soft / unmaintained]';
       lines.push(`### ${b.package} (${b.reason})${typeLabel}`);
       lines.push(`- Dependency kind: ${b.dependencyKind ?? 'runtime'}`);
+      if (b.hard && b.reason !== 'peer-conflict' && step.resolution.status === 'confirmed') {
+        lines.push(
+          `- Peer check vs package manager: tool peer check = hard blocker (${b.reason}); ${pmName} check = resolved by ${pmName} without errors.`,
+        );
+      }
       if (b.evidence) {
         const evLabel = b.evidence === 'verified' ? 'verified by build' : 'declared compatible';
         lines.push(`- Evidence: ${evLabel}`);

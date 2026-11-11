@@ -166,6 +166,7 @@ describe('steps writer and decision tracking', () => {
   it('reports which package manager confirmed the set and whether it did so with warnings', () => {
     const yarnWarnStep: PlannedStep = {
       ...sampleStep,
+      blockers: [],
       resolution: {
         status: 'confirmed',
         packageManager: 'yarn',
@@ -176,6 +177,7 @@ describe('steps writer and decision tracking', () => {
 
     const pnpmCleanStep: PlannedStep = {
       ...sampleStep,
+      blockers: [],
       resolution: {
         status: 'confirmed',
         packageManager: 'pnpm',

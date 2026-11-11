@@ -114,6 +114,6 @@ ng-migrator --project ./path/to/app --as-of 2026-11-01 plan --to 19
 ## Documentation
 
 - [Rule Authoring Guide](docs/rules.md)
-- [Troubleshooting & Error Codes](docs/troubleshooting.md)
+- [Troubleshooting & Error Codes](https://github.com/berserker5619/ng-migrator/blob/main/docs/troubleshooting.md) ([local copy](docs/troubleshooting.md))
 - [Security Policy](SECURITY.md)
 - [Release Checklist](RELEASE_CHECKLIST.md)

@@ -30,7 +30,7 @@ export function gitSubcommand(args: readonly string[]): string | undefined {
   return undefined;
 }
 
-/** Throws unless the command is a read-only git call (or not git at all). */
+/** Throws unless the command is a read-only git call with --no-optional-locks (or not git at all). */
 export function assertAllowedCommand(command: string, args: readonly string[]): void {
   if (!isGit(command)) return;
   const sub = gitSubcommand(args);
@@ -38,6 +38,17 @@ export function assertAllowedCommand(command: string, args: readonly string[]): 
     throw new NgmError('NGM-6002', `Refusing to run "git ${sub ?? ''}": ng-migrator never writes to git.`, {
       hint: 'This is a bug in ng-migrator. Please report it with the log file.',
     });
+  }
+  const subIdx = args.indexOf(sub);
+  const lockIdx = args.indexOf('--no-optional-locks');
+  if (lockIdx === -1 || lockIdx > subIdx) {
+    throw new NgmError(
+      'NGM-6002',
+      `Refusing to run "git ${args.join(' ')}" without --no-optional-locks: ng-migrator never locks or modifies .git/index.`,
+      {
+        hint: 'This is a bug in ng-migrator. Please report it with the log file.',
+      },
+    );
   }
 }
 

@@ -8,6 +8,7 @@ import { authHeaderFor, registryFor, type NpmrcConfig } from './npmrc.js';
 /** The fields of a published version that planning needs. */
 export interface VersionMeta {
   version: string;
+  dependencies?: Record<string, string>;
   peerDependencies?: Record<string, string>;
   peerDependenciesMeta?: Record<string, { optional?: boolean }>;
   engines?: { node?: string };

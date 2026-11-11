@@ -27,19 +27,19 @@ npm notice package: ng-migrator@0.1.0
 npm notice Tarball Contents
 npm notice 3.3kB CHANGELOG.md
 npm notice 1.1kB LICENSE
-npm notice 5.7kB README.md
-npm notice 129.9kB dist/cli.js
-npm notice 261.8kB dist/cli.js.map
+npm notice 5.8kB README.md
+npm notice 135.0kB dist/cli.js
 npm notice 1.4kB package.json
 npm notice Tarball Details
 npm notice name: ng-migrator
 npm notice version: 0.1.0
 npm notice filename: ng-migrator-0.1.0.tgz
-npm notice package size: 101.2 kB
-npm notice unpacked size: 403.2 kB
-npm notice total files: 6
+npm notice package size: 39.5 kB
+npm notice unpacked size: 146.6 kB
+npm notice total files: 5
 ```
 
+- **Source maps decision:** Excluded from the published npm package (`sourcemap: false` in `tsup.config.ts`). Shipping `dist/cli.js.map` increased the unpacked tarball size from **146.6 kB to 416.6 kB** (+184%) and the packed tarball from **39.5 kB to 104.4 kB** (+164%) without benefit for an executable Node CLI, as TypeScript source files are not shipped in the tarball. Stack traces in Node 22+ still include file names, line numbers, and error IDs.
 - Only `dist/`, `README.md`, `CHANGELOG.md`, `LICENSE`, and `package.json` are included (`"files": ["dist"]` in `package.json`).
 - No `test/`, `corpus/`, `src/`, or `.ng-migrator/` artifacts are leaked into the published tarball.
 
@@ -61,8 +61,9 @@ npm notice total files: 6
 
 ## 7. Provenance & Trusted Publishing Notes
 - **Workflow:** [`.github/workflows/release.yml`](./.github/workflows/release.yml) triggers on `v*` tags (`v0.1.0`).
-- **Pinned GitHub Actions:** All workflow actions in `ci.yml`, `nightly.yml`, and `release.yml` are pinned by full 40-character commit SHA with version comments (`actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v5.0.0`, `actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0`).
+- **Pinned GitHub Actions:** All workflow actions in `ci.yml`, `nightly.yml`, and `release.yml` are pinned by full 40-character commit SHA with version comments (`actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1`, `actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0`).
 - **OIDC Trusted Publishing & Provenance:**
   - `release.yml` declares `permissions: contents: read, id-token: write`.
   - Runs `npm publish --provenance --access public` on Node `24` (npm `11+`), which uses OpenID Connect (OIDC) Trusted Publishing without long-lived `NPM_TOKEN` secrets when Trusted Publisher is configured on npmjs.com for the repository and `release.yml` workflow.
   - Ensure the repository URL in `package.json` (`repository.url`) matches the GitHub `owner/repo` configured in npm Trusted Publisher settings so provenance attestation verification succeeds.
+
