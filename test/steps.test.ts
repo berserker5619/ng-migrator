@@ -103,5 +103,39 @@ describe('steps writer', () => {
 
     // The checked decision must be preserved!
     expect(reloadedContent).toContain('- [x] Decide resolution for some-tooltip-lib');
+
+    // Scoped package decision test
+    const scopedStep: PlannedStep = {
+      ...sampleStep,
+      blockers: [
+        {
+          package: '@angular/flex-layout',
+          reason: 'no-compatible-version',
+          hard: true,
+          details: 'Deprecated and archived',
+          recommendation: 'alternate',
+        },
+      ],
+    };
+    const scopedPlan: Plan = {
+      ...samplePlan,
+      steps: [scopedStep],
+    };
+    const scopedRes = await writePlanDocuments(dir, scopedPlan);
+    const scopedFile = scopedRes.stepFiles[0]!;
+    const scopedInit = await readFile(scopedFile, 'utf8');
+    expect(scopedInit).toContain('<!-- id: blocker-@angular/flex-layout -->');
+
+    const scopedChecked = scopedInit.replace(
+      '- [ ] Decide resolution for @angular/flex-layout',
+      '- [x] Decide resolution for @angular/flex-layout',
+    );
+    await writeFile(scopedFile, scopedChecked);
+    const scopedDecisions = await extractDecisionsFromFile(scopedFile);
+    expect(scopedDecisions['blocker-@angular/flex-layout']).toBe(true);
+
+    await writePlanDocuments(dir, scopedPlan);
+    const scopedReloaded = await readFile(scopedFile, 'utf8');
+    expect(scopedReloaded).toContain('- [x] Decide resolution for @angular/flex-layout');
   });
 });

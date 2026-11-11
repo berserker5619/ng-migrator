@@ -3,4 +3,5 @@ dist/
 coverage/
 *.tgz
 .ng-migrator/
+test-clones/
 

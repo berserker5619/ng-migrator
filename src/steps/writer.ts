@@ -169,7 +169,7 @@ export async function extractDecisionsFromFile(filePath: string): Promise<Record
 
   try {
     const text = await readFile(filePath, 'utf8');
-    const regex = /- \[([ xX])\] (.*?)<!-- id: ([\w-]+) -->/g;
+    const regex = /- \[([ xX])\] (.*?)<!-- id: ([^\s>]+) -->/g;
     let match;
     while ((match = regex.exec(text)) !== null) {
       const isChecked = match[1]?.toLowerCase() === 'x';
