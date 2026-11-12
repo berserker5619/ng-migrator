@@ -216,7 +216,26 @@ Run "ng-migrator approve 1" after reviewing.
 
 ---
 
-## 4. Status and Approval Verification
+## 4. Extended 10-Project Evaluation (Batch 2)
+
+To rigorously validate behavior across diverse package manager ecosystems (npm, pnpm, yarn), workspace layouts (single, angular-multi, nx), architecture styles (ngmodule, standalone), and Angular versions (12 to 22), 10 additional open-source Angular projects were tested:
+
+| # | Project | Angular Version | Total Pkgs | Workspace / Manager | Result & Notes |
+|---|---|---|---|---|---|
+| 1 | **`nx-examples`** | `21.2.0` | **102** | `nx` / `yarn` (classic) | Planned to 22. Dynamically estimated ~1878 MB across 2348 lockfile packages for Yarn 1.x isolated install. |
+| 2 | **`now-ui-dashboard-angular`** | `^13.2.6` | **62** | `angular-multi` / `npm` | Planned to 14. Identified dead dependency `jw-bootstrap-switch-ng2` (0 usages across 53 files). |
+| 3 | **`jhipster-app`** | `22.1.6` | **56** | `single` / `npm` | At latest release; `analyze` cleanly reported `NGM-2002` (no major 23 yet). |
+| 4 | **`ng-alain`** | `^22.2.0` | **55** | `single` / `pnpm` | Detected `pnpm` via `packageManager` field; reported `NGM-2002` at target ceiling. |
+| 5 | **`paper-dashboard-angular`** | `^14.2.0` | **49** | `angular-multi` / `npm` | Planned to 15. Flagged deprecated `@ngui/map` and `codelyzer` tooling migration. |
+| 6 | **`light-bootstrap-dashboard-angular`** | `^14.2.0` | **45** | `angular-multi` / `npm` | Planned to 15. Detected deprecated `@ngui/map` and `codelyzer`. |
+| 7 | **`flight-app`** | `~13.2.3` | **44** | `single` / `npm` | Planned to 14. Detected `@ngrx/store-devtools` and `codelyzer`. |
+| 8 | **`argon-dashboard-angular`** | `^14.2.0` | **44** | `angular-multi` / `npm` | Planned to 15. Recommended replacing unmaintained `ngx-clipboard` with CDK Clipboard. |
+| 9 | **`sakai-ng`** | `^21.0.6` | **37** | `single` / `npm` (standalone) | Planned to 22. Detected standalone architecture; flagged deprecation of `@angular-devkit/build-angular` $\rightarrow$ `@angular/build`. |
+| 10 | **`black-dashboard-angular`** | `12.1.2` | **36** | `single` / `npm` | Planned from 12 $\rightarrow$ 13. Successfully planned View Engine $\rightarrow$ Ivy transition requirements. |
+
+---
+
+## 5. Status and Approval Verification
 
 Commands were tested on the planned step of `ngx-admin`:
 ```powershell
@@ -241,28 +260,42 @@ Follow the planned actions in the step document or commit your review.
 
 ---
 
-## 5. Non-Destructive Safety Verification
+## 6. Non-Destructive Safety Verification
 
-Following `doctor`, `analyze`, `plan`, and `approve`, `git status --short` was executed against all target repositories:
+Following `doctor`, `analyze`, `plan`, and `approve`, `git status --short` was executed against all target repositories (including the 10 extended repositories):
 
 ```powershell
-=== Git status for L:\test-clones\ngx-admin ===
+=== Git status for now-ui-dashboard-angular ===
 ?? .ng-migrator/
-=== Git status for L:\test-clones\my-thai-star ===
-?? angular/.ng-migrator/
-=== Git status for L:\test-clones\material-dashboard-angular ===
+=== Git status for paper-dashboard-angular ===
+?? .ng-migrator/
+=== Git status for light-bootstrap-dashboard-angular ===
+?? .ng-migrator/
+=== Git status for flight-app ===
+?? .ng-migrator/
+=== Git status for argon-dashboard-angular ===
+?? .ng-migrator/
+=== Git status for black-dashboard-angular ===
+?? .ng-migrator/
+=== Git status for sakai-ng ===
+?? .ng-migrator/
+=== Git status for jhipster-app ===
+?? .ng-migrator/
+=== Git status for ng-alain ===
+?? .ng-migrator/
+=== Git status for nx-examples ===
 ?? .ng-migrator/
 ```
 
 ### Safety Guarantees Confirmed:
 1. **0 project source files modified**: No application code was altered.
-2. **0 manifest or lockfile modifications**: Root `package.json` and `package-lock.json` were left intact.
+2. **0 manifest or lockfile modifications**: Root `package.json` and lockfiles were left intact.
 3. **0 git config or `.gitignore` modifications**: Tested projects were not written to outside `.ng-migrator/`.
 4. All plan state, cache, step runbooks, and locks remained strictly isolated within the project's `.ng-migrator/` subfolder.
 
 ---
 
-## 6. Performance & Scale Observations
+## 7. Performance & Scale Observations
 
 | Phase | Small Project (~20 pkgs) | Large Project (~80 pkgs) | Notes |
 |---|---|---|---|
