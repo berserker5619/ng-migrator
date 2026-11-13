@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.1.2] - 2026-11-12
+
+- **Sibling / Indirect Peer Resolution**: Resolved ecosystem packages lacking direct `@angular/*` peer ranges (such as `@ngrx/store-devtools` peering on `@ngrx/store`) alongside their sibling dependencies rather than falsely flagging them as `no-compatible-version` blockers.
+- **Harmonized Blocker Counting**: Exported and unified `enrichBlockersWithResolutionCheck` across both `analyze` and `plan`, ensuring package manager peer conflicts (e.g. `@angular-eslint/schematics`) are aggregated consistently and eliminating count discrepancies between the two commands.
+- **Version Ceiling & Target Exit Code**: Added audit-only mode to `analyze` without `--to` on projects already at the maximum published Angular major (exiting `0`), and aligned out-of-bounds target errors (`NGM-2002`) to exit code `2` (Usage/Input error).
+- **Yarn Classic Performance**: Added `--prefer-offline` and `--no-bin-links` to isolated temporary directory verification for Yarn 1.x projects, avoiding unnecessary binary compilation and linking during planning runs.
+
 ## [1.1.1] - 2026-11-11
 
 - Fixed semver range parsing crash (`TypeError: Invalid comparator`) on packages with malformed peer dependencies (e.g. single pipe `|` instead of `||` as in `@swimlane/ngx-charts`).

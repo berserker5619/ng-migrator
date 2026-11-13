@@ -17,6 +17,7 @@ import {
   isNgmError,
   type ErrorId,
 } from '../errors.js';
+import type { ResolutionCheck } from '../model.js';
 import { isPortInUse } from '../platform/doctor.js';
 import { checkGitStatus } from '../platform/git.js';
 import { writeGeneratedText } from '../platform/text.js';
@@ -24,9 +25,10 @@ import { getStepRequirements } from '../planner/metadata.js';
 import { createPlan } from '../planner/plan.js';
 import { readProject } from '../reader/project.js';
 import { loadRules } from '../recommend/rules.js';
-import { RegistryClient } from '../registry/client.js';
+import { RegistryClient, stableVersionsDesc } from '../registry/client.js';
 import { loadNpmrc } from '../registry/npmrc.js';
 import { resolveStepDependencies } from '../resolver/resolve.js';
+import { enrichBlockersWithResolutionCheck, verifyWithPackageManager } from '../resolver/verify.js';
 import { withLock } from '../state/lock.js';
 import { readState, writeState } from '../state/state.js';
 import {
@@ -151,10 +153,11 @@ export function createProgram(
   program
     .command('analyze')
     .description('report what the project has and what blocks the next upgrade')
+    .option('--to <major>', 'target Angular major version (defaults to next major)', parseTargetMajor)
     .option('--fail-on-blockers', 'exit with code 4 when hard blockers are found')
     .option('--report <path>', 'write the report to this path')
     .option('--offline', 'use cached registry data only')
-    .action(async (opts: { failOnBlockers?: boolean; report?: string; offline?: boolean }) => {
+    .action(async (opts: { to?: number; failOnBlockers?: boolean; report?: string; offline?: boolean }) => {
       const out = getOutput();
       const projectRoot = getProjectRoot();
       const project = await readProject(projectRoot);
@@ -163,7 +166,6 @@ export function createProgram(
       if (!currentMajor) {
         throw new NgmError('NGM-3007', 'Could not detect Angular version from project dependencies.');
       }
-      const nextMajor = currentMajor + 1;
 
       const { config: fileConfig } = await readConfigFile(projectRoot);
       const config = resolveConfig({}, fileConfig, { packageManager: project.packageManager.name });
@@ -175,10 +177,36 @@ export function createProgram(
         onWarning: (msg) => out.warn(msg),
       });
 
-      out.info(`Analyzing project: ${project.name ?? path.basename(projectRoot)}`);
-      out.info(`Current Angular: ${project.angular.version} (major ${currentMajor}) -> Target step: ${nextMajor}\n`);
+      const corePack = await registry.packument('@angular/core');
+      const maxPublishedMajor = corePack
+        ? Math.max(...stableVersionsDesc(corePack).map((v) => semver.major(v)))
+        : 22;
 
-      const requirements = await getStepRequirements(nextMajor, registry);
+      // When running analyze without --to on a project already at the latest Angular major,
+      // report audit status and exit 0 (plan Section 19.3).
+      if (opts.to === undefined && currentMajor >= maxPublishedMajor) {
+        out.info(`Analyzing project: ${project.name ?? path.basename(projectRoot)}`);
+        out.success(`✔ Project is already on the latest Angular major (${currentMajor}). Auditing current dependencies only...\n`);
+
+        out.info(`Dependencies analyzed: ${project.dependencies.length}`);
+        out.info(`Proposed package updates: 0 (already on latest Angular)`);
+        out.info(`Blockers detected: 0\n`);
+        out.success('No dependency blockers found.');
+        return;
+      }
+
+      const targetMajor = opts.to ?? (currentMajor + 1);
+      if (opts.to !== undefined && opts.to <= currentMajor) {
+        throw new NgmError('NGM-2002', `--to ${opts.to} must be greater than current Angular major ${currentMajor}.`);
+      }
+      if (targetMajor > maxPublishedMajor) {
+        throw new NgmError('NGM-2002', `No published releases found for Angular major version ${targetMajor}.`);
+      }
+
+      out.info(`Analyzing project: ${project.name ?? path.basename(projectRoot)}`);
+      out.info(`Current Angular: ${project.angular.version} (major ${currentMajor}) -> Target step: ${targetMajor}\n`);
+
+      const requirements = await getStepRequirements(targetMajor, registry);
       const rules = await loadRules(config.rules, projectRoot);
       const clock = getClock();
       const resolution = await resolveStepDependencies({
@@ -193,6 +221,29 @@ export function createProgram(
         unmaintainedThresholdMonths: config.unmaintainedThresholdMonths,
         clock,
       });
+
+      // Run package-manager verification check to catch peer conflicts identically to plan
+      let resolutionCheck: ResolutionCheck = { status: 'skipped', packageManager: config.packageManager };
+      if (!opts.offline) {
+        try {
+          resolutionCheck = await verifyWithPackageManager({
+            projectRoot,
+            packageManager: config.packageManager,
+            changes: resolution.changes,
+            timeoutMs: config.resolutionTimeoutMs,
+          });
+        } catch {
+          // Leave skipped if verification cannot run
+        }
+      }
+
+      enrichBlockersWithResolutionCheck(
+        resolution.blockers,
+        resolutionCheck,
+        project,
+        targetMajor,
+        config.packageManager,
+      );
 
       out.info(`Dependencies analyzed: ${project.dependencies.length}`);
       out.info(`Proposed package updates: ${resolution.changes.length}`);
@@ -215,7 +266,7 @@ export function createProgram(
         const reportData = {
           project: project.name,
           currentAngular: project.angular.version,
-          nextMajor,
+          targetMajor,
           blockers: resolution.blockers,
           changes: resolution.changes,
           heldBack: resolution.heldBack,

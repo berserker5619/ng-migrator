@@ -3,7 +3,7 @@ import { copyFile, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type { PackageManager } from '../config/config.js';
-import type { PackageChange, PeerConflict, ResolutionCheck } from '../model.js';
+import type { Blocker, PackageChange, PeerConflict, ProjectInfo, ResolutionCheck } from '../model.js';
 import { pathExists, readJsonIfExists, removeWithRetry } from '../platform/fs.js';
 import { run } from '../platform/process.js';
 
@@ -400,7 +400,14 @@ export async function verifyWithPackageManager(
       if (yarnFlavor === 'berry') {
         args = ['install', '--mode', 'update-lockfile', '--ignore-scripts'];
       } else {
-        args = ['install', '--ignore-scripts', '--non-interactive', '--no-progress'];
+        args = [
+          'install',
+          '--ignore-scripts',
+          '--prefer-offline',
+          '--no-bin-links',
+          '--non-interactive',
+          '--no-progress',
+        ];
         let pkgCount = Object.keys(deps).length + Object.keys(devDeps).length;
         let source: 'lockfile' | 'manifest' = 'manifest';
         const yarnLockDest = path.join(tempDir, 'yarn.lock');
@@ -531,5 +538,75 @@ export async function verifyWithPackageManager(
       cleaned = true;
       await removeWithRetry(tempDir).catch(() => undefined);
     }
+  }
+}
+
+/**
+ * Enriches a list of blockers with peer conflict entries parsed from package manager resolution verification.
+ */
+export function enrichBlockersWithResolutionCheck(
+  blockers: Blocker[],
+  resolutionCheck: ResolutionCheck,
+  project: ProjectInfo,
+  targetMajor: number,
+  packageManager: PackageManager,
+): void {
+  if (resolutionCheck.status !== 'conflict') return;
+
+  const overrideKey =
+    packageManager === 'yarn'
+      ? 'resolutions'
+      : packageManager === 'pnpm'
+        ? 'pnpm.overrides'
+        : 'overrides';
+
+  const conflicts = resolutionCheck.conflicts ?? [];
+  if (conflicts.length > 0) {
+    for (const conflict of conflicts) {
+      const pkgName = conflict.requiredBy.replace(/@[^@]+$/, '');
+      const depInfo = project.dependencies.find((d) => d.name === pkgName);
+      const dependencyKind = depInfo?.type === 'devDependencies' ? 'dev-only' : 'runtime';
+      const optionsList = [
+        `Swap ${pkgName} for a compatible package or version supporting ${conflict.peer} in Angular ${targetMajor}.`,
+        `Add an explicit override in package.json under "${overrideKey}" for "${conflict.peer}".`,
+      ];
+      const conflictDetails = `Peer dependency conflict (${packageManager}): ${conflict.requiredBy} requires peer ${conflict.peer}@"${conflict.range}"${conflict.found ? `, but found ${conflict.found}` : ''}.`;
+
+      const existing = blockers.find(
+        (b) => b.package === pkgName && b.reason === 'peer-conflict',
+      );
+      if (!existing) {
+        blockers.push({
+          package: pkgName,
+          reason: 'peer-conflict',
+          hard: true,
+          dependencyKind,
+          details: conflictDetails,
+          recommendedFix: `Swap ${pkgName} or add an explicit override in package.json (${overrideKey})`,
+          source: 'analysis',
+          confidence: 'high',
+          effort: '15 to 30 minutes',
+          runnerUp: `Add explicit override in package.json under "${overrideKey}"`,
+          options: optionsList,
+        });
+      }
+    }
+  } else {
+    blockers.push({
+      package: 'peer-resolution',
+      reason: 'peer-conflict',
+      hard: true,
+      dependencyKind: 'runtime',
+      details: resolutionCheck.detail ?? 'Package manager reported peer dependency conflict during resolution check.',
+      recommendedFix: `Swap conflicting package or add an explicit override in package.json (${overrideKey})`,
+      source: 'analysis',
+      confidence: 'medium',
+      effort: '15 to 30 minutes',
+      runnerUp: `Add explicit override in package.json under "${overrideKey}"`,
+      options: [
+        'Swap the conflicting package for a compatible alternative.',
+        `Add an explicit override in package.json under "${overrideKey}".`,
+      ],
+    });
   }
 }

@@ -25,9 +25,9 @@ function io(overrides: Partial<CliIo> = {}) {
 describe('cli', () => {
   it('prints the version', async () => {
     const t = io();
-    expect(TOOL_VERSION).toBe('1.1.1');
+    expect(TOOL_VERSION).toBe('1.1.2');
     expect(await runCli(['--version'], t.value)).toBe(ExitCode.Success);
-    expect(t.out().trim()).toBe('1.1.1');
+    expect(t.out().trim()).toBe('1.1.2');
   });
 
   it('lists the 1.0 commands in help and rejects migrate', async () => {
@@ -325,6 +325,39 @@ describe('cli', () => {
       expect(stepDoc2).toBe(stepDoc1);
       expect(summary2).toBe(summary1);
       expect(state2).toBe(state1);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('exits 0 on analyze when project is already on latest major, and exits 2 on out-of-bounds --to', async () => {
+    const { dir, cleanup } = await tempProject();
+    try {
+      await writeFile(
+        path.join(dir, 'package.json'),
+        JSON.stringify({
+          name: 'latest-major-app',
+          dependencies: { '@angular/core': '^22.0.0' },
+        }),
+      );
+      await writeCacheEntry(dir, '@angular/core', {
+        name: '@angular/core',
+        distTags: { latest: '22.2.0' },
+        versions: {
+          '22.0.0': { version: '22.0.0' },
+          '22.2.0': { version: '22.2.0' },
+        },
+      });
+
+      const out = io({ cwd: dir });
+      const code = await runCli(['analyze', '--offline'], out.value);
+      expect(code).toBe(ExitCode.Success);
+      expect(out.out()).toContain('already on the latest Angular major');
+
+      const outTo23 = io({ cwd: dir });
+      const codeTo23 = await runCli(['analyze', '--to', '23', '--offline'], outTo23.value);
+      expect(codeTo23).toBe(ExitCode.Usage);
+      expect(outTo23.err()).toContain('NGM-2002');
     } finally {
       await cleanup();
     }

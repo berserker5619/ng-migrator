@@ -5,7 +5,7 @@ import type { Plan, PlannedStep, ProjectInfo, ResolutionCheck } from '../model.j
 import { loadRules } from '../recommend/rules.js';
 import type { RegistryClient } from '../registry/client.js';
 import { resolveStepDependencies } from '../resolver/resolve.js';
-import { verifyWithPackageManager } from '../resolver/verify.js';
+import { enrichBlockersWithResolutionCheck, verifyWithPackageManager } from '../resolver/verify.js';
 import { getStepRequirements } from './metadata.js';
 
 export interface PlanOptions {
@@ -90,64 +90,13 @@ export async function createPlan(options: PlanOptions): Promise<Plan> {
       });
     }
 
-    if (resolutionCheck.status === 'conflict') {
-      const overrideKey =
-        config.packageManager === 'yarn'
-          ? 'resolutions'
-          : config.packageManager === 'pnpm'
-            ? 'pnpm.overrides'
-            : 'overrides';
-
-      const conflicts = resolutionCheck.conflicts ?? [];
-      if (conflicts.length > 0) {
-        for (const conflict of conflicts) {
-          const pkgName = conflict.requiredBy.replace(/@[^@]+$/, '');
-          const depInfo = project.dependencies.find((d) => d.name === pkgName);
-          const dependencyKind = depInfo?.type === 'devDependencies' ? 'dev-only' : 'runtime';
-          const optionsList = [
-            `Swap ${pkgName} for a compatible package or version supporting ${conflict.peer} in Angular ${toMajor}.`,
-            `Add an explicit override in package.json under "${overrideKey}" for "${conflict.peer}".`,
-          ];
-          const conflictDetails = `Peer dependency conflict (${config.packageManager}): ${conflict.requiredBy} requires peer ${conflict.peer}@"${conflict.range}"${conflict.found ? `, but found ${conflict.found}` : ''}.`;
-
-          const existing = stepResolution.blockers.find(
-            (b) => b.package === pkgName && b.reason === 'peer-conflict',
-          );
-          if (!existing) {
-            stepResolution.blockers.push({
-              package: pkgName,
-              reason: 'peer-conflict',
-              hard: true,
-              dependencyKind,
-              details: conflictDetails,
-              recommendedFix: `Swap ${pkgName} or add an explicit override in package.json (${overrideKey})`,
-              source: 'analysis',
-              confidence: 'high',
-              effort: '15 to 30 minutes',
-              runnerUp: `Add explicit override in package.json under "${overrideKey}"`,
-              options: optionsList,
-            });
-          }
-        }
-      } else {
-        stepResolution.blockers.push({
-          package: 'peer-resolution',
-          reason: 'peer-conflict',
-          hard: true,
-          dependencyKind: 'runtime',
-          details: resolutionCheck.detail ?? 'Package manager reported peer dependency conflict during resolution check.',
-          recommendedFix: `Swap conflicting package or add an explicit override in package.json (${overrideKey})`,
-          source: 'analysis',
-          confidence: 'medium',
-          effort: '15 to 30 minutes',
-          runnerUp: `Add explicit override in package.json under "${overrideKey}"`,
-          options: [
-            'Swap the conflicting package for a compatible alternative.',
-            `Add an explicit override in package.json under "${overrideKey}".`,
-          ],
-        });
-      }
-    }
+    enrichBlockersWithResolutionCheck(
+      stepResolution.blockers,
+      resolutionCheck,
+      project,
+      toMajor,
+      config.packageManager,
+    );
 
     // If a package had a "remove" recommendation at an earlier step n, do not repeat it as a blocker
     // at later steps; instead record that this step depends on the decision at step n.

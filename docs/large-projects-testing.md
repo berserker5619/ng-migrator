@@ -303,3 +303,28 @@ Following `doctor`, `analyze`, `plan`, and `approve`, `git status --short` was e
 | **`analyze`** (uncached) | `~ 2 s` | `~ 15-20 s` | Fetches registry packuments for all packages |
 | **`analyze`** (cached) | `< 500 ms` | `< 1.5 s` | Pure in-memory / disk cache evaluation |
 | **`plan`** (peer verification) | `~ 8 s` | `~ 35-45 s` | Dominated by isolated `npm install --dry-run` resolution in temp dir |
+
+---
+
+## 8. Resolution Hardening & Log Reconciliation (v1.1.2)
+
+Analysis of real-world test logs across all 13 repositories identified three resolver subtleties and one package manager performance enhancement, resolved and validated in version 1.1.2:
+
+### A. Sibling & Indirect Peer Dependency Resolution
+* **Symptom:** In `my-thai-star` and `flight-app`, `@ngrx/store-devtools` produced a false-positive `no-compatible-version` blocker (`No release of @ngrx/store-devtools supports @angular/core 14.3.0`), even while sibling packages `@ngrx/store`, `@ngrx/effects`, and `@ngrx/entity` resolved cleanly to `^14.3.3`.
+* **Root Cause:** `@ngrx/store-devtools` versions 12.x–17.x declare `"peerDependencies": { "@ngrx/store": "..." }` and have no direct `@angular/core` peer range. The resolver previously checked only direct `@angular/*` peer ranges, rejecting packages that rely on sibling peers.
+* **Fix:** `src/resolver/resolve.ts` now inspects peer dependencies against sibling project dependencies and changes (e.g. `@ngrx/store`), resolving them in lockstep with their parent ecosystem group.
+
+### B. Blocker Count Alignment Between `analyze` and `plan`
+* **Symptom:** `ngx-admin` reported 5 blockers in `analyze` but 6 in `plan`; `my-thai-star` reported 6 in `analyze` but 8 in `plan`.
+* **Root Cause:** `plan` ran package manager peer conflict verification (`verifyWithPackageManager`), which extracted additional peer conflicts (such as `@angular-eslint/schematics`), whereas `analyze` was missing this enrichment step.
+* **Fix:** Exported `enrichBlockersWithResolutionCheck` in `src/resolver/verify.ts` and integrated it across both `analyze` and `plan`, guaranteeing 1:1 blocker count parity.
+
+### C. Version Ceiling & Exit Code Alignment (`NGM-2002`)
+* **Symptom:** Projects already on the latest published Angular major (`jhipster-app` and `ng-alain` on v22) failed with `NGM-2002: No published releases found for Angular major version 23` and exited with code 1 when running `analyze` without `--to`.
+* **Root Cause:** Unspecified target defaulted to `currentMajor + 1`, attempting to analyze unpublished Angular 23. Furthermore, out-of-bounds user targets should exit with code 2 (Usage/Input error per Section 19.3) rather than code 1 (Unexpected error).
+* **Fix:** `analyze` without `--to` on a project at the latest Angular major now enters audit-only mode, reporting current dependency status and cleanly exiting `0`. Explicit out-of-bounds targets (`--to 23`) throw `NGM-2002` and exit with code `2`.
+
+### D. Yarn Classic (1.x) Isolated Resolution Optimization
+* **Optimization:** Added `--prefer-offline` and `--no-bin-links` to the isolated temporary install invocation for Yarn 1.x projects (such as `nx-examples`), preventing native script compilation and avoiding binary linking during planning runs.
+

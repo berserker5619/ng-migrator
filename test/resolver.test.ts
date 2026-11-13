@@ -741,6 +741,71 @@ describe('resolveStepDependencies', () => {
       'held back from 5.0.4 to 5.0.12 because those newer releases declare no Angular peer range; chose 5.0.3 as the highest release declaring an @angular/* peer range supporting Angular 13',
     );
   });
+
+  it('resolves sibling peer dependencies when package lacks direct @angular/core peer (e.g. @ngrx/store-devtools)', async () => {
+    const siblingProject: ProjectInfo = {
+      root: 'l:/fake/ngrx-app',
+      name: 'ngrx-app',
+      packageManager: { name: 'npm', source: 'default' },
+      workspace: 'single',
+      angularProjects: [],
+      angular: { version: '12.2.0', major: 12 },
+      style: 'ngmodule',
+      dependencies: [
+        { name: '@angular/core', declared: '^12.2.0', installed: '12.2.0', type: 'dependencies' },
+        { name: '@ngrx/store', declared: '^12.2.0', installed: '12.2.0', type: 'dependencies' },
+        { name: '@ngrx/store-devtools', declared: '^12.2.0', installed: '12.2.0', type: 'dependencies' },
+      ],
+      overrides: [],
+      viewEngineSuspects: [],
+      ngccScripts: [],
+      hasNodeModules: false,
+      hasNpmWorkspaces: false,
+      warnings: [],
+    };
+
+    const siblingRegistry = {
+      async packument(name: string) {
+        if (name === '@ngrx/store') {
+          return {
+            name: '@ngrx/store',
+            distTags: { latest: '14.3.3' },
+            versions: {
+              '12.2.0': { version: '12.2.0', peerDependencies: { '@angular/core': '^12.0.0' } },
+              '14.3.3': { version: '14.3.3', peerDependencies: { '@angular/core': '^14.0.0' } },
+            },
+          };
+        }
+        if (name === '@ngrx/store-devtools') {
+          return {
+            name: '@ngrx/store-devtools',
+            distTags: { latest: '14.3.3' },
+            versions: {
+              '12.2.0': { version: '12.2.0', peerDependencies: { '@ngrx/store': '12.2.0' } },
+              '14.3.3': { version: '14.3.3', peerDependencies: { '@ngrx/store': '14.3.3' } },
+              '18.1.0': { version: '18.1.0', peerDependencies: { '@angular/core': '^18.0.0' } },
+            },
+          };
+        }
+        return undefined;
+      },
+    } as unknown as RegistryClient;
+
+    const result = await resolveStepDependencies({
+      project: siblingProject,
+      requirements: { major: 14, coreVersion: '14.3.0', notes: [] },
+      registry: siblingRegistry,
+      neverTouch: [],
+    });
+
+    const storeChange = result.changes.find((c) => c.name === '@ngrx/store');
+    const devtoolsChange = result.changes.find((c) => c.name === '@ngrx/store-devtools');
+    expect(storeChange?.target).toBe('14.3.3');
+    expect(devtoolsChange?.target).toBe('14.3.3');
+    // Ensure @ngrx/store-devtools is NOT marked as a blocker!
+    const devtoolsBlocker = result.blockers.find((b) => b.package === '@ngrx/store-devtools');
+    expect(devtoolsBlocker).toBeUndefined();
+  });
 });
 
 describe('Yarn Classic (1.x) vs Berry (2+) detection and verification', () => {
@@ -765,7 +830,7 @@ describe('Yarn Classic (1.x) vs Berry (2+) detection and verification', () => {
         'classic',
         '1.22.22\n',
         '# yarn lockfile v1\n',
-        'yarn install --ignore-scripts --non-interactive --no-progress',
+        'yarn install --ignore-scripts --prefer-offline --no-bin-links --non-interactive --no-progress',
       ],
     ] as const) {
       const { dir, cleanup } = await tempProject();

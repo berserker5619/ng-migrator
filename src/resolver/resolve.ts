@@ -14,7 +14,7 @@ import {
   type Packument,
   type RegistryClient,
 } from '../registry/client.js';
-import { preserveRangeStyle, safeMinVersion, satisfiesAngularPeer } from './range.js';
+import { normalizeRange, preserveRangeStyle, safeMinVersion, satisfiesAngularPeer } from './range.js';
 
 export interface ResolveStepOptions {
   project: ProjectInfo;
@@ -89,7 +89,17 @@ export async function resolveStepDependencies(
   const coreVersion = requirements.coreVersion;
   const activeRules = options.rules ?? getBuiltInRules();
 
-  for (const dep of project.dependencies) {
+  // Partition dependencies so primary packages (e.g. @ngrx/store) are resolved
+  // before secondary packages that peer on them (e.g. @ngrx/store-devtools, schematics, adapters).
+  const sortedDependencies = [...project.dependencies].sort((a, b) => {
+    const isSecondaryA = a.name.includes('devtools') || a.name.includes('schematics') || a.name.includes('adapter');
+    const isSecondaryB = b.name.includes('devtools') || b.name.includes('schematics') || b.name.includes('adapter');
+    if (isSecondaryA && !isSecondaryB) return 1;
+    if (!isSecondaryA && isSecondaryB) return -1;
+    return 0;
+  });
+
+  for (const dep of sortedDependencies) {
     if (neverTouchSet.has(dep.name)) {
       unchanged.push(dep.name);
       continue;
@@ -274,19 +284,32 @@ export async function resolveStepDependencies(
     }
 
     const allReleases = allVersionsDesc(pack);
-    const hasAngularPeer = allReleases.some(
+    const hasDirectAngularPeer = allReleases.some(
       (v) =>
         pack.versions[v]?.peerDependencies?.['@angular/core'] !== undefined ||
         pack.versions[v]?.peerDependencies?.['@angular/common'] !== undefined,
     );
 
-    if (!hasAngularPeer && !rule) {
-      // Package does not have Angular peer dependencies (e.g. lodash, date-fns, karma)
+    // Check if package declares peers on sibling packages present in the project (e.g. @ngrx/store)
+    const hasSiblingPeer = allReleases.some((v) => {
+      const p = pack.versions[v]?.peerDependencies;
+      return (
+        p &&
+        Object.keys(p).some(
+          (k) => !k.startsWith('@angular/') && project.dependencies.some((d) => d.name === k),
+        )
+      );
+    });
+
+    const isEcosystemPackage = Boolean(hasDirectAngularPeer || hasSiblingPeer);
+
+    if (!isEcosystemPackage && !rule) {
+      // Package does not have Angular or sibling peer dependencies (e.g. lodash, date-fns, karma)
       unchanged.push(dep.name);
       continue;
     }
 
-    // Look for newer releases that require Angular > targetMajor (held back)
+    // Look for newer releases that require Angular > targetMajor or sibling > targetMajor (held back)
     for (const v of allReleases) {
       const meta = pack.versions[v];
       const peer = meta?.peerDependencies?.['@angular/core'];
@@ -300,19 +323,79 @@ export async function resolveStepDependencies(
           });
           break; // record newest held back
         }
+      } else if (meta?.peerDependencies) {
+        const siblingPeer = Object.entries(meta.peerDependencies).find(([k]) =>
+          project.dependencies.some((d) => d.name === k),
+        );
+        if (siblingPeer) {
+          const [siblingName, peerRange] = siblingPeer;
+          const minV = safeMinVersion(peerRange);
+          if (minV && minV.major > targetMajor) {
+            heldBack.push({
+              name: dep.name,
+              version: v,
+              reason: `Requires ${siblingName} ${peerRange} (needs Angular ${minV.major}+)`,
+            });
+            break;
+          }
+        }
       }
     }
 
-    // Propose newest version compatible with target Angular based strictly on peer ranges
+    // Propose newest version compatible with target Angular based on direct or sibling peer ranges
     const compatible = allReleases.filter((v) => {
       const meta = pack.versions[v];
-      if (hasAngularPeer) {
-        const versionHasPeer =
-          meta?.peerDependencies?.['@angular/core'] !== undefined ||
-          meta?.peerDependencies?.['@angular/common'] !== undefined;
-        if (!versionHasPeer) return false;
+      const peerDeps = meta?.peerDependencies;
+
+      // 1. Direct Angular peer check
+      const versionHasDirectPeer =
+        peerDeps?.['@angular/core'] !== undefined ||
+        peerDeps?.['@angular/common'] !== undefined;
+
+      if (versionHasDirectPeer) {
+        return satisfiesAngularPeer(peerDeps, coreVersion, targetMajor, v);
       }
-      return satisfiesAngularPeer(meta?.peerDependencies, coreVersion, targetMajor, v);
+
+      // 2. Sibling / indirect peer check (e.g. @ngrx/store-devtools peering on @ngrx/store)
+      if (hasSiblingPeer && peerDeps) {
+        for (const [siblingName, peerRange] of Object.entries(peerDeps)) {
+          if (siblingName.startsWith('@angular/')) continue;
+          const isProjectDep = project.dependencies.some((d) => d.name === siblingName);
+          if (!isProjectDep) continue;
+
+          const inChanges = changes.find((c) => c.name === siblingName);
+          const inProject = project.dependencies.find((d) => d.name === siblingName);
+          const siblingTarget =
+            inChanges?.target ?? inProject?.installed ?? safeMinVersion(inProject?.declared ?? '')?.version;
+
+          if (siblingTarget) {
+            const normalized = normalizeRange(peerRange);
+            if (semver.validRange(normalized)) {
+              if (semver.satisfies(siblingTarget, normalized)) {
+                return true;
+              }
+              const minV = safeMinVersion(peerRange);
+              if (minV && minV.major === targetMajor) {
+                return true;
+              }
+            }
+          }
+        }
+      }
+
+      // 3. Same-scope lockstep fallback (e.g. @ngrx/* packages)
+      if (dep.name.startsWith('@') && dep.name.includes('/')) {
+        const scope = dep.name.split('/')[0]!;
+        const sameScopeChange = changes.find((c) => c.name.startsWith(`${scope}/`) && c.name !== dep.name);
+        if (sameScopeChange?.target) {
+          if (v === sameScopeChange.target || semver.major(v) === semver.major(sameScopeChange.target)) {
+            return true;
+          }
+        }
+      }
+
+      if (hasDirectAngularPeer) return false;
+      return true;
     });
 
     const targetVersion = compatible.find((v) => semver.prerelease(v) === null) ?? compatible[0];
@@ -323,15 +406,16 @@ export async function resolveStepDependencies(
       const isDeprecated = Boolean(meta?.deprecated);
       const isUnmaint = isPackageUnmaintained(pack, targetVersion, rule, unmaintainedThresholdMonths, effectiveNow, targetMajor);
 
-      const newerWithoutAngularPeer = hasAngularPeer
+      const newerWithoutAngularPeer = hasDirectAngularPeer
         ? allReleases.filter((v) => {
-            if (!semver.gt(v, targetVersion)) return false;
-            const m = pack.versions[v];
-            return (
-              m?.peerDependencies?.['@angular/core'] === undefined &&
-              m?.peerDependencies?.['@angular/common'] === undefined
-            );
-          })
+          if (!semver.gt(v, targetVersion)) return false;
+          const m = pack.versions[v];
+          const p = m?.peerDependencies;
+          if (!p) return true;
+          if (p['@angular/core'] !== undefined || p['@angular/common'] !== undefined) return false;
+          if (Object.keys(p).some((k) => project.dependencies.some((d) => d.name === k))) return false;
+          return true;
+        })
         : [];
 
       let chosenVersionReason: string | undefined;
@@ -349,6 +433,13 @@ export async function resolveStepDependencies(
         });
       }
 
+      const matchedSibling = meta?.peerDependencies
+        ? Object.keys(meta.peerDependencies).find((k) => project.dependencies.some((d) => d.name === k))
+        : undefined;
+      const defaultReason = matchedSibling
+        ? `Peer range supports ${matchedSibling} (Angular ${targetMajor})`
+        : `Peer range supports Angular ${targetMajor}`;
+
       if (currentVersion && semver.eq(currentVersion, targetVersion) && !isDeprecated && !isUnmaint) {
         unchanged.push(dep.name);
       } else {
@@ -360,8 +451,8 @@ export async function resolveStepDependencies(
           target: targetVersion,
           targetSpec: preserveRangeStyle(targetVersion, dep.declared),
           reason: heldRangeLabel
-            ? `Peer range supports Angular ${targetMajor} (chose ${targetVersion}; ${heldRangeLabel} held back with no Angular peer range)`
-            : `Peer range supports Angular ${targetMajor}`,
+            ? `${defaultReason} (chose ${targetVersion}; ${heldRangeLabel} held back with no Angular peer range)`
+            : defaultReason,
           evidence: 'declared',
           deprecated: meta?.deprecated,
           unmaintained: isUnmaint,
