@@ -352,12 +352,65 @@ describe('cli', () => {
       const out = io({ cwd: dir });
       const code = await runCli(['analyze', '--offline'], out.value);
       expect(code).toBe(ExitCode.Success);
-      expect(out.out()).toContain('already on the latest Angular major');
+      expect(out.out()).toContain('already on the latest published major (22); nothing to upgrade');
 
       const outTo23 = io({ cwd: dir });
       const codeTo23 = await runCli(['analyze', '--to', '23', '--offline'], outTo23.value);
       expect(codeTo23).toBe(ExitCode.Usage);
       expect(outTo23.err()).toContain('NGM-2002');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('prints clear warning on manifest vs lockfile disagreement across doctor, analyze, and plan', async () => {
+    const { dir, cleanup } = await tempProject({
+      'package.json': JSON.stringify({
+        name: 'disagree-app',
+        dependencies: { '@angular/core': '^14.2.0' },
+      }),
+      'package-lock.json': JSON.stringify({
+        name: 'disagree-app',
+        lockfileVersion: 2,
+        packages: {
+          '': { dependencies: { '@angular/core': '^14.2.0' } },
+          'node_modules/@angular/core': { version: '13.3.1' },
+        },
+        dependencies: {
+          '@angular/core': { version: '13.3.1' },
+        },
+      }),
+    });
+    try {
+      await writeCacheEntry(dir, '@angular/core', {
+        name: '@angular/core',
+        distTags: { latest: '14.3.0' },
+        versions: {
+          '13.3.1': { version: '13.3.1' },
+          '14.3.0': { version: '14.3.0' },
+        },
+      });
+
+      // Doctor
+      const doctorIo = io({ cwd: dir });
+      await runCli(['doctor'], doctorIo.value);
+      const doctorOutput = doctorIo.out() + doctorIo.err();
+      expect(doctorOutput).toContain('Manifest vs lockfile disagreement');
+      expect(doctorOutput).toContain('package.json declares @angular/core "^14.2.0"');
+      expect(doctorOutput).toContain('lockfile has "13.3.1"');
+
+      // Analyze
+      const analyzeIo = io({ cwd: dir });
+      await runCli(['analyze', '--offline'], analyzeIo.value);
+      const analyzeOutput = analyzeIo.out() + analyzeIo.err();
+      expect(analyzeOutput).toContain('Manifest vs lockfile disagreement');
+
+      // Plan
+      const planIo = io({ cwd: dir });
+      await runCli(['plan', '--to', '14', '--offline'], planIo.value);
+      const planOutput = planIo.out() + planIo.err();
+      expect(planOutput).toContain('Manifest vs lockfile disagreement');
+      expect(planOutput).toContain('Planning upgrade: Angular 13.3.1 -> 14');
     } finally {
       await cleanup();
     }

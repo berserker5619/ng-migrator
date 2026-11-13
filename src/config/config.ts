@@ -146,18 +146,20 @@ export async function readConfigFile(root: string): Promise<{ config: FileConfig
 }
 
 /** Precedence: command-line flags, then the config file, then auto-detection, then defaults. */
-export function resolveConfig(flags: FlagConfig, file: FileConfig, detected: DetectedConfig): ResolvedConfig {
+export function resolveConfig(flags: FlagConfig, file: FileConfig = {}, detected: DetectedConfig = {}): ResolvedConfig {
+  const f = file ?? {};
+  const d = detected ?? {};
   return {
-    packageManager: flags.packageManager ?? file.packageManager ?? detected.packageManager ?? 'npm',
-    rules: [...(file.rules ?? []), ...(flags.rules ?? [])],
-    neverTouch: [...(file.neverTouch ?? [])],
-    pinned: { ...(file.pinned ?? {}) },
-    alternates: { allow: [...(file.alternates?.allow ?? [])], deny: [...(file.alternates?.deny ?? [])] },
-    verify: { ...(file.verify ?? {}) },
-    cacheDir: file.cacheDir ?? '.ng-migrator/cache',
-    unmaintainedThresholdMonths: file.unmaintainedThresholdMonths ?? 18,
-    resolutionTimeoutMs: file.resolutionTimeoutMs ?? 300_000,
-    commandPrefix: file.commandPrefix,
+    packageManager: flags?.packageManager ?? f.packageManager ?? d.packageManager ?? 'npm',
+    rules: [...(f.rules ?? []), ...(flags?.rules ?? [])],
+    neverTouch: [...(f.neverTouch ?? [])],
+    pinned: { ...(f.pinned ?? {}) },
+    alternates: { allow: [...(f.alternates?.allow ?? [])], deny: [...(f.alternates?.deny ?? [])] },
+    verify: { ...(f.verify ?? {}) },
+    cacheDir: f.cacheDir ?? '.ng-migrator/cache',
+    unmaintainedThresholdMonths: f.unmaintainedThresholdMonths ?? 18,
+    resolutionTimeoutMs: f.resolutionTimeoutMs ?? 300_000,
+    commandPrefix: f.commandPrefix,
   };
 }
 

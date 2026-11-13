@@ -35,6 +35,13 @@ export interface ProjectInfo {
   hasNpmWorkspaces: boolean;
   /** Platform-independent warnings, sorted. */
   warnings: string[];
+  manifestLockfileDisagreement?: {
+    declared: string;
+    installed: string;
+    declaredMajor?: number;
+    installedMajor: number;
+    reason: string;
+  };
 }
 
 export interface StepRequirements {
@@ -48,6 +55,13 @@ export interface StepRequirements {
   notes: string[];
 }
 
+export type EvidenceKind =
+  | 'declared-compatible'
+  | 'declared-incompatible'
+  | 'unknown'
+  | 'verified'
+  | 'declared';
+
 export interface PackageChange {
   name: string;
   type: DependencyType;
@@ -58,11 +72,15 @@ export interface PackageChange {
   /** New package.json value, keeping the user's range style. */
   targetSpec: string;
   reason: string;
-  evidence: 'declared' | 'verified';
+  evidence: EvidenceKind;
   /** Set when the chosen release is deprecated on the registry. */
   deprecated?: string;
   /** Set when the package has had no releases for >= threshold months or flagged by rule. */
   unmaintained?: boolean;
+  /** Newest published version on the registry, for unknown / held back comparisons. */
+  newestVersion?: string;
+  /** Explanation for unknown evidence classification. */
+  unknownExplanation?: string;
 }
 
 export interface HeldBack {
@@ -88,9 +106,13 @@ export interface Blocker {
   chosenVersion?: string;
   /** Reason why chosenVersion was selected over newer releases. */
   chosenVersionReason?: string;
-  evidence?: 'declared' | 'verified';
+  evidence?: EvidenceKind;
   unmaintained?: boolean;
   riskNote?: string;
+  /** Newest published version on the registry, for unknown / held back comparisons. */
+  newestVersion?: string;
+  /** Explanation for unknown evidence classification. */
+  unknownExplanation?: string;
   recommendation?: 'upgrade' | 'alternate' | 'fork' | 'inline' | 'remove' | 'manual';
   recommendedFix?: string;
   source?: 'analysis' | 'rule';
@@ -149,6 +171,13 @@ export interface PlannedStep {
   actions: string[];
   risks: string[];
   breakingChangesUrl: string;
+  manifestLockfileDisagreement?: {
+    declared: string;
+    installed: string;
+    declaredMajor?: number;
+    installedMajor: number;
+    reason: string;
+  };
 }
 
 export interface Plan {

@@ -5,9 +5,16 @@ import path from 'node:path';
 import { pathExists, removeWithRetry } from '../src/platform/fs.js';
 import type { Packument } from '../src/registry/client.js';
 
-/** A temporary directory whose path contains spaces, removed by the returned cleanup. */
-export async function tempProject(): Promise<{ dir: string; cleanup: () => Promise<void> }> {
+/** A temporary directory whose path contains spaces, removed by the returned cleanup. Optionally writes initial files. */
+export async function tempProject(files?: Record<string, string>): Promise<{ dir: string; cleanup: () => Promise<void> }> {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'ng migrator test '));
+  if (files) {
+    for (const [rel, content] of Object.entries(files)) {
+      const target = path.join(dir, rel);
+      await mkdir(path.dirname(target), { recursive: true });
+      await writeFile(target, content);
+    }
+  }
   return { dir, cleanup: () => removeWithRetry(dir) };
 }
 

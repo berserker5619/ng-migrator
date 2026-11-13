@@ -726,20 +726,9 @@ describe('resolveStepDependencies', () => {
     });
 
     const change = result.changes.find((c) => c.name === 'ngx-logger');
-    expect(change?.target).toBe('5.0.3');
-    expect(result.heldBack).toEqual([
-      {
-        name: 'ngx-logger',
-        version: '5.0.4 to 5.0.12',
-        reason:
-          'Newer release(s) (5.0.4 to 5.0.12) declare no Angular peer range; chose 5.0.3 as highest release declaring an @angular/* peer range (>=11.0.0)',
-      },
-    ]);
-    const blocker = result.blockers.find((b) => b.package === 'ngx-logger');
-    expect(blocker?.chosenVersion).toBe('5.0.3');
-    expect(blocker?.chosenVersionReason).toContain(
-      'held back from 5.0.4 to 5.0.12 because those newer releases declare no Angular peer range; chose 5.0.3 as the highest release declaring an @angular/* peer range supporting Angular 13',
-    );
+    expect(change?.target).toBe('5.0.4');
+    expect(change?.evidence).toBe('unknown');
+    expect(change?.reason).toContain('published on 2022-02-01 during the Angular 13 lifecycle');
   });
 
   it('resolves sibling peer dependencies when package lacks direct @angular/core peer (e.g. @ngrx/store-devtools)', async () => {
@@ -1031,3 +1020,560 @@ describe('Yarn Classic (1.x) vs Berry (2+) detection and verification', () => {
     }
   });
 });
+
+describe('Three-state evidence and synthetic pattern fixtures', () => {
+  it('handles pattern A: no Angular peer but aligned sibling peer (@ngrx/store-devtools)', async () => {
+    const project: ProjectInfo = {
+      root: 'l:/fake/ngrx-app',
+      name: 'ngrx-app',
+      packageManager: { name: 'npm', source: 'default' },
+      workspace: 'single',
+      angularProjects: [],
+      angular: { version: '13.1.2', major: 13 },
+      style: 'ngmodule',
+      dependencies: [
+        { name: '@angular/core', declared: '^13.1.2', installed: '13.1.2', type: 'dependencies' },
+        { name: '@ngrx/store', declared: '^13.1.2', installed: '13.1.2', type: 'dependencies' },
+        { name: '@ngrx/store-devtools', declared: '^13.1.2', installed: '13.1.2', type: 'dependencies' },
+      ],
+      overrides: [],
+      viewEngineSuspects: [],
+      ngccScripts: [],
+      hasNodeModules: false,
+      hasNpmWorkspaces: false,
+      warnings: [],
+    };
+
+    const registry = {
+      async packument(name: string) {
+        if (name === '@angular/core') {
+          return {
+            name: '@angular/core',
+            distTags: { latest: '14.3.0' },
+            versions: { '14.3.0': { version: '14.3.0' } },
+            time: { '14.0.0': '2022-06-02T00:00:00.000Z', '15.0.0': '2022-11-16T00:00:00.000Z' },
+          };
+        }
+        if (name === '@ngrx/store') {
+          return {
+            name: '@ngrx/store',
+            distTags: { latest: '14.3.3' },
+            versions: {
+              '13.1.2': { version: '13.1.2', peerDependencies: { '@angular/core': '^13.0.0' } },
+              '14.3.3': { version: '14.3.3', peerDependencies: { '@angular/core': '^14.0.0' } },
+            },
+          };
+        }
+        if (name === '@ngrx/store-devtools') {
+          return {
+            name: '@ngrx/store-devtools',
+            distTags: { latest: '18.1.1' },
+            versions: {
+              '13.1.2': { version: '13.1.2', peerDependencies: { '@ngrx/store': '13.1.2' } },
+              '14.3.3': { version: '14.3.3', peerDependencies: { '@ngrx/store': '14.3.3' } },
+              '18.1.1': { version: '18.1.1', peerDependencies: { '@angular/core': '^18.0.0' } },
+            },
+          };
+        }
+        return undefined;
+      },
+    } as unknown as RegistryClient;
+
+    const result = await resolveStepDependencies({
+      project,
+      requirements: { major: 14, coreVersion: '14.3.0', notes: [] },
+      registry,
+      neverTouch: [],
+    });
+
+    const devtoolsChange = result.changes.find((c) => c.name === '@ngrx/store-devtools');
+    expect(devtoolsChange?.target).toBe('14.3.3');
+    expect(devtoolsChange?.evidence).toBe('unknown');
+    expect(devtoolsChange?.reason).toContain('aligned with sibling dependency @ngrx/store@14.3.3');
+    expect(devtoolsChange?.reason).toContain('Unknown, verify by build');
+
+    // Crucial: unknown evidence must NEVER produce a hard blocker!
+    const hardBlocker = result.blockers.find((b) => b.package === '@ngrx/store-devtools' && b.hard);
+    expect(hardBlocker).toBeUndefined();
+  });
+
+  it('handles pattern B: version-aligned releases without Angular peers (ngx-echarts at Angular 16)', async () => {
+    const project: ProjectInfo = {
+      root: 'l:/fake/echarts-app',
+      name: 'echarts-app',
+      packageManager: { name: 'npm', source: 'default' },
+      workspace: 'single',
+      angularProjects: [],
+      angular: { version: '15.2.10', major: 15 },
+      style: 'ngmodule',
+      dependencies: [
+        { name: '@angular/core', declared: '^15.2.10', installed: '15.2.10', type: 'dependencies' },
+        { name: 'ngx-echarts', declared: '^15.0.3', installed: '15.0.3', type: 'dependencies' },
+      ],
+      overrides: [],
+      viewEngineSuspects: [],
+      ngccScripts: [],
+      hasNodeModules: false,
+      hasNpmWorkspaces: false,
+      warnings: [],
+    };
+
+    const registry = {
+      async packument(name: string) {
+        if (name === '@angular/core') {
+          return {
+            name: '@angular/core',
+            distTags: { latest: '16.2.12' },
+            versions: { '16.2.12': { version: '16.2.12' } },
+            time: { '16.0.0': '2023-05-03T00:00:00.000Z', '17.0.0': '2023-11-08T00:00:00.000Z' },
+          };
+        }
+        if (name === 'ngx-echarts') {
+          return {
+            name: 'ngx-echarts',
+            distTags: { latest: '22.0.0' },
+            versions: {
+              '6.0.1': { version: '6.0.1', peerDependencies: { '@angular/core': '>=10.0.0' } },
+              '15.0.3': { version: '15.0.3', peerDependencies: { echarts: '>=5.0.0' } },
+              '16.2.0': { version: '16.2.0', peerDependencies: { echarts: '>=5.0.0' } },
+              '22.0.0': { version: '22.0.0', peerDependencies: { echarts: '>=5.0.0' } },
+            },
+          };
+        }
+        return undefined;
+      },
+    } as unknown as RegistryClient;
+
+    const result = await resolveStepDependencies({
+      project,
+      requirements: { major: 16, coreVersion: '16.2.12', notes: [] },
+      registry,
+      neverTouch: [],
+    });
+
+    const echartsChange = result.changes.find((c) => c.name === 'ngx-echarts');
+    // Must NOT downgrade to 6.0.1! Must choose 16.2.0 and show newest 22.0.0
+    expect(echartsChange?.target).toBe('16.2.0');
+    expect(echartsChange?.newestVersion).toBe('22.0.0');
+    expect(echartsChange?.evidence).toBe('unknown');
+    expect(echartsChange?.reason).toContain('major version 16 aligns with Angular 16');
+    expect(echartsChange?.reason).toContain('Unknown, verify by build');
+
+    const hardBlocker = result.blockers.find((b) => b.package === 'ngx-echarts' && b.hard);
+    expect(hardBlocker).toBeUndefined();
+  });
+
+  it('handles pattern C: real declared incompatibility (ng2-smart-table declaring @angular/core ^10.0.0)', async () => {
+    const project: ProjectInfo = {
+      root: 'l:/fake/table-app',
+      name: 'table-app',
+      packageManager: { name: 'npm', source: 'default' },
+      workspace: 'single',
+      angularProjects: [],
+      angular: { version: '15.2.10', major: 15 },
+      style: 'ngmodule',
+      dependencies: [
+        { name: '@angular/core', declared: '^15.2.10', installed: '15.2.10', type: 'dependencies' },
+        { name: 'ng2-smart-table', declared: '^1.7.2', installed: '1.7.2', type: 'dependencies' },
+      ],
+      overrides: [],
+      viewEngineSuspects: [],
+      ngccScripts: [],
+      hasNodeModules: false,
+      hasNpmWorkspaces: false,
+      warnings: [],
+    };
+
+    const registry = {
+      async packument(name: string) {
+        if (name === '@angular/core') {
+          return {
+            name: '@angular/core',
+            distTags: { latest: '16.2.12' },
+            versions: { '16.2.12': { version: '16.2.12' } },
+          };
+        }
+        if (name === 'ng2-smart-table') {
+          return {
+            name: 'ng2-smart-table',
+            distTags: { latest: '1.7.2' },
+            versions: {
+              '1.7.2': {
+                version: '1.7.2',
+                peerDependencies: {
+                  '@angular/core': '^10.0.0',
+                  '@angular/common': '^10.0.0',
+                },
+              },
+            },
+          };
+        }
+        return undefined;
+      },
+    } as unknown as RegistryClient;
+
+    const result = await resolveStepDependencies({
+      project,
+      requirements: { major: 16, coreVersion: '16.2.12', notes: [] },
+      registry,
+      neverTouch: [],
+    });
+
+    const hardBlocker = result.blockers.find((b) => b.package === 'ng2-smart-table');
+    expect(hardBlocker).toBeDefined();
+    expect(hardBlocker?.hard).toBe(true);
+    expect(hardBlocker?.reason).toBe('no-compatible-version');
+    expect(hardBlocker?.evidence).toBe('declared-incompatible');
+  });
+
+  it('handles pattern D: package declaring no Angular peer in any release (ng2-ckeditor) - soft unknown, never hard', async () => {
+    const project: ProjectInfo = {
+      root: 'l:/fake/editor-app',
+      name: 'editor-app',
+      packageManager: { name: 'npm', source: 'default' },
+      workspace: 'single',
+      angularProjects: [],
+      angular: { version: '15.2.10', major: 15 },
+      style: 'ngmodule',
+      dependencies: [
+        { name: '@angular/core', declared: '^15.2.10', installed: '15.2.10', type: 'dependencies' },
+        { name: 'ng2-ckeditor', declared: '^1.3.7', installed: '1.3.7', type: 'dependencies' },
+      ],
+      overrides: [],
+      viewEngineSuspects: [],
+      ngccScripts: [],
+      hasNodeModules: false,
+      hasNpmWorkspaces: false,
+      warnings: [],
+    };
+
+    const registry = {
+      async packument(name: string) {
+        if (name === '@angular/core') {
+          return {
+            name: '@angular/core',
+            distTags: { latest: '16.2.12' },
+            versions: { '16.2.12': { version: '16.2.12' } },
+          };
+        }
+        if (name === 'ng2-ckeditor') {
+          return {
+            name: 'ng2-ckeditor',
+            distTags: { latest: '1.3.7' },
+            versions: {
+              '1.3.7': { version: '1.3.7', peerDependencies: { '@types/ckeditor': '^4.9.10' } },
+            },
+          };
+        }
+        return undefined;
+      },
+    } as unknown as RegistryClient;
+
+    const result = await resolveStepDependencies({
+      project,
+      requirements: { major: 16, coreVersion: '16.2.12', notes: [] },
+      registry,
+      neverTouch: [],
+    });
+
+    const ckChange = result.changes.find((c) => c.name === 'ng2-ckeditor');
+    expect(ckChange?.target).toBe('1.3.7');
+    expect(ckChange?.evidence).toBe('unknown');
+
+    const hardBlocker = result.blockers.find((b) => b.package === 'ng2-ckeditor' && b.hard);
+    expect(hardBlocker).toBeUndefined();
+
+    const softBlocker = result.blockers.find((b) => b.package === 'ng2-ckeditor');
+    expect(softBlocker).toBeDefined();
+    expect(softBlocker?.hard).toBe(false);
+    expect(softBlocker?.evidence).toBe('unknown');
+  });
+
+  it('handles pattern E: publish date falling between release dates of Angular n and n+1 (ngx-logger 5.0.12)', async () => {
+    const project: ProjectInfo = {
+      root: 'l:/fake/logger-app',
+      name: 'logger-app',
+      packageManager: { name: 'npm', source: 'default' },
+      workspace: 'single',
+      angularProjects: [],
+      angular: { version: '14.2.0', major: 14 },
+      style: 'ngmodule',
+      dependencies: [
+        { name: '@angular/core', declared: '^14.2.0', installed: '14.2.0', type: 'dependencies' },
+        { name: 'ngx-logger', declared: '^5.0.3', installed: '5.0.3', type: 'dependencies' },
+      ],
+      overrides: [],
+      viewEngineSuspects: [],
+      ngccScripts: [],
+      hasNodeModules: false,
+      hasNpmWorkspaces: false,
+      warnings: [],
+    };
+
+    const registry = {
+      async packument(name: string) {
+        if (name === '@angular/core') {
+          return {
+            name: '@angular/core',
+            distTags: { latest: '15.2.10' },
+            versions: { '15.2.10': { version: '15.2.10' } },
+            time: {
+              '15.0.0': '2022-11-16T00:00:00.000Z',
+              '16.0.0': '2023-05-03T00:00:00.000Z',
+            },
+          };
+        }
+        if (name === 'ngx-logger') {
+          return {
+            name: 'ngx-logger',
+            distTags: { latest: '5.0.12' },
+            versions: {
+              '5.0.3': { version: '5.0.3', peerDependencies: { '@angular/core': '>6.0.0' } },
+              '5.0.12': { version: '5.0.12', peerDependencies: { rxjs: '>6.0.0' }, releaseDate: '2023-04-13T14:29:38.404Z' },
+            },
+            time: {
+              '5.0.3': '2021-11-08T18:42:10.271Z',
+              '5.0.12': '2023-04-13T14:29:38.404Z',
+            },
+          };
+        }
+        return undefined;
+      },
+    } as unknown as RegistryClient;
+
+    const result = await resolveStepDependencies({
+      project,
+      requirements: { major: 15, coreVersion: '15.2.10', notes: [] },
+      registry,
+      neverTouch: [],
+    });
+
+    const loggerChange = result.changes.find((c) => c.name === 'ngx-logger');
+    expect(loggerChange?.target).toBe('5.0.12');
+    expect(loggerChange?.evidence).toBe('unknown');
+    expect(loggerChange?.reason).toContain('published on 2023-04-13 during the Angular 15 lifecycle');
+  });
+});
+
+describe('Robustness: malformed peer range table-driven suite', () => {
+  const malformedRanges: Array<[string, unknown]> = [
+    ['pipe malformed', '7.x | 8.x'],
+    ['empty string', ''],
+    ['wildcard star', '*'],
+    ['tag string latest', 'latest'],
+    ['workspace protocol', 'workspace:*'],
+    ['npm alias protocol', 'npm:other@1'],
+    ['git url', 'git+https://example.com/x.git'],
+    ['file path', 'file:../x'],
+    ['unclosed operator', '>=1.0.0 <'],
+    ['bare caret', '^'],
+    ['huge 10,000-char string', 'a'.repeat(10_000)],
+    ['raw number', 16],
+  ];
+
+  for (const [desc, val] of malformedRanges) {
+    it(`never crashes on ${desc} (${typeof val === 'string' && val.length > 30 ? `${val.slice(0, 20)}...` : JSON.stringify(val)})`, async () => {
+      expect(() => normalizeRange(val)).not.toThrow();
+      expect(() => safeMinVersion(val)).not.toThrow();
+      expect(() => satisfiesAngularPeer({ '@angular/core': val as unknown as string }, '16.2.12', 16)).not.toThrow();
+
+      // Ensure full resolveStepDependencies does not crash when this range is encountered
+      const project: ProjectInfo = {
+        root: 'l:/fake/robust-app',
+        name: 'robust-app',
+        packageManager: { name: 'npm', source: 'default' },
+        workspace: 'single',
+        angularProjects: [],
+        angular: { version: '15.2.10', major: 15 },
+        style: 'ngmodule',
+        dependencies: [
+          { name: '@angular/core', declared: '^15.2.10', installed: '15.2.10', type: 'dependencies' },
+          { name: 'ngx-odd-pkg', declared: '^1.0.0', installed: '1.0.0', type: 'dependencies' },
+        ],
+        overrides: [],
+        viewEngineSuspects: [],
+        ngccScripts: [],
+        hasNodeModules: false,
+        hasNpmWorkspaces: false,
+        warnings: [],
+      };
+
+      const registry = {
+        async packument(name: string) {
+          if (name === '@angular/core') {
+            return {
+              name: '@angular/core',
+              distTags: { latest: '16.2.12' },
+              versions: { '16.2.12': { version: '16.2.12' } },
+            };
+          }
+          if (name === 'ngx-odd-pkg') {
+            return {
+              name: 'ngx-odd-pkg',
+              distTags: { latest: '1.0.0' },
+              versions: {
+                '1.0.0': { version: '1.0.0', peerDependencies: { '@angular/core': val as unknown as string } },
+              },
+            };
+          }
+          return undefined;
+        },
+      } as unknown as RegistryClient;
+
+      await expect(
+        resolveStepDependencies({
+          project,
+          requirements: { major: 16, coreVersion: '16.2.12', notes: [] },
+          registry,
+          neverTouch: [],
+        }),
+      ).resolves.toBeDefined();
+    });
+  }
+});
+
+describe('Manifest vs Lockfile Disagreement and View Engine Warnings', () => {
+  it('detects manifest vs lockfile disagreement and warns in project reader and step runbook', async () => {
+    const { dir, cleanup } = await tempProject({
+      'package.json': JSON.stringify({
+        name: 'material-app',
+        dependencies: {
+          '@angular/core': '^14.2.0',
+        },
+      }),
+      'package-lock.json': JSON.stringify({
+        name: 'material-app',
+        lockfileVersion: 2,
+        packages: {
+          '': {
+            dependencies: { '@angular/core': '^14.2.0' },
+          },
+          'node_modules/@angular/core': {
+            version: '13.3.1',
+          },
+        },
+        dependencies: {
+          '@angular/core': {
+            version: '13.3.1',
+          },
+        },
+      }),
+    });
+
+    try {
+      const project = await readProject(dir);
+      expect(project.angular.major).toBe(13);
+      expect(project.angular.version).toBe('13.3.1');
+      expect(project.manifestLockfileDisagreement).toBeDefined();
+      expect(project.manifestLockfileDisagreement?.declared).toBe('^14.2.0');
+      expect(project.manifestLockfileDisagreement?.installed).toBe('13.3.1');
+      expect(project.warnings.some((w) => w.includes('Manifest vs lockfile disagreement'))).toBe(true);
+
+      const registry = {
+        async packument(name: string) {
+          if (name === '@angular/core') {
+            return {
+              name: '@angular/core',
+              distTags: { latest: '14.3.0' },
+              versions: { '14.3.0': { version: '14.3.0' } },
+            };
+          }
+          return undefined;
+        },
+      } as unknown as RegistryClient;
+
+      const plan = await createPlan({
+        project,
+        targetMajor: 14,
+        registry,
+        config: resolveConfig({}, undefined, { packageManager: 'npm' }),
+        verifyResolution: false,
+      });
+
+      expect(plan.steps).toHaveLength(1);
+      expect(plan.steps[0]?.from).toBe(13);
+      expect(plan.steps[0]?.to).toBe(14);
+      expect(plan.steps[0]?.manifestLockfileDisagreement).toBeDefined();
+
+      const { formatStepDocument } = await import('../src/steps/writer.js');
+      const doc = formatStepDocument(plan.steps[0]!, undefined, false);
+      expect(doc).toContain('Manifest vs Lockfile Disagreement');
+      expect(doc).toContain('package.json declares `@angular/core: "^14.2.0"`');
+      expect(doc).toContain('lockfile installs `13.3.1`');
+      expect(doc).toContain('View Engine/ngcc check NOT performed (node_modules missing)');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('detects View Engine library with __processed_by_ivy_ngcc__ or .metadata.json in node_modules', async () => {
+    const { dir, cleanup } = await tempProject({
+      'package.json': JSON.stringify({
+        name: 'ivy-check-app',
+        dependencies: {
+          '@angular/core': '^15.2.0',
+          'legacy-ve-lib': '^1.0.0',
+        },
+      }),
+      'node_modules/@angular/core/package.json': JSON.stringify({
+        name: '@angular/core',
+        version: '15.2.10',
+      }),
+      'node_modules/legacy-ve-lib/package.json': JSON.stringify({
+        name: 'legacy-ve-lib',
+        version: '1.0.0',
+        __processed_by_ivy_ngcc__: { core: '15.2.10' },
+        peerDependencies: {
+          '@angular/core': '^15.0.0',
+        },
+        typings: 'index.d.ts',
+      }),
+      'node_modules/legacy-ve-lib/index.d.ts': 'export declare class LegacyModule {}',
+      'node_modules/legacy-ve-lib/index.metadata.json': '{"__symbolic":"module","version":4}',
+    });
+
+    try {
+      const project = await readProject(dir);
+      expect(project.hasNodeModules).toBe(true);
+      expect(project.viewEngineSuspects).toContain('legacy-ve-lib');
+
+      const registry = {
+        async packument(name: string) {
+          if (name === '@angular/core') {
+            return {
+              name: '@angular/core',
+              distTags: { latest: '16.2.12' },
+              versions: { '16.2.12': { version: '16.2.12' } },
+            };
+          }
+          if (name === 'legacy-ve-lib') {
+            return {
+              name: 'legacy-ve-lib',
+              distTags: { latest: '1.0.0' },
+              versions: {
+                '1.0.0': { version: '1.0.0', peerDependencies: { '@angular/core': '>=15.0.0' } },
+              },
+            };
+          }
+          return undefined;
+        },
+      } as unknown as RegistryClient;
+
+      // When planning to Angular 16 (where ngcc was dropped), View Engine library must be a hard blocker!
+      const result = await resolveStepDependencies({
+        project,
+        requirements: { major: 16, coreVersion: '16.2.12', notes: [] },
+        registry,
+      });
+
+      const veBlocker = result.blockers.find((b) => b.package === 'legacy-ve-lib');
+      expect(veBlocker).toBeDefined();
+      expect(veBlocker?.hard).toBe(true);
+      expect(veBlocker?.reason).toBe('ivy-or-ngcc');
+      expect(veBlocker?.details).toContain('compiled for View Engine and relies on ngcc, which was removed in Angular 16');
+    } finally {
+      await cleanup();
+    }
+  });
+});
+

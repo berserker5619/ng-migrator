@@ -253,6 +253,34 @@ export async function readProject(root: string): Promise<ProjectInfo> {
     ...(coreVersion ? { version: coreVersion, major: semver.major(coreVersion) } : {}),
   };
 
+  let manifestLockfileDisagreement: ProjectInfo['manifestLockfileDisagreement'] = undefined;
+  if (core?.declared && core?.installed) {
+    const declaredMin = safeMinVersion(core.declared)?.version;
+    const declaredMajor = declaredMin ? semver.major(declaredMin) : undefined;
+    const installedMajor = semver.major(core.installed);
+    if (declaredMajor !== undefined && declaredMajor !== installedMajor) {
+      const reason = `package.json declares @angular/core "${core.declared}" (major ${declaredMajor}), but lockfile has "${core.installed}" (major ${installedMajor}). Upgrades are planned from installed version ${core.installed} to avoid skipping intermediate migration schematics.`;
+      warnings.push(`Manifest vs lockfile disagreement: ${reason}`);
+      manifestLockfileDisagreement = {
+        declared: core.declared,
+        installed: core.installed,
+        declaredMajor,
+        installedMajor,
+        reason,
+      };
+    } else if (!semver.satisfies(core.installed, core.declared)) {
+      const reason = `package.json declares @angular/core "${core.declared}", but lockfile has "${core.installed}". Upgrades are planned from installed version ${core.installed}.`;
+      warnings.push(`Manifest vs lockfile disagreement: ${reason}`);
+      manifestLockfileDisagreement = {
+        declared: core.declared,
+        installed: core.installed,
+        declaredMajor,
+        installedMajor,
+        reason,
+      };
+    }
+  }
+
   const workspace = await detectWorkspace(root);
 
   const files = await walkProject(root, { extensions: ['.ts'] });
@@ -303,5 +331,6 @@ export async function readProject(root: string): Promise<ProjectInfo> {
     hasNodeModules,
     hasNpmWorkspaces: pkg.workspaces !== undefined,
     warnings: warnings.sort(compareOrdinal),
+    ...(manifestLockfileDisagreement ? { manifestLockfileDisagreement } : {}),
   };
 }

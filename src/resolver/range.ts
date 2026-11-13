@@ -1,11 +1,25 @@
 import semver from 'semver';
 
 /**
- * Normalizes common malformed semver range strings encountered in real-world npm packages.
+ * Normalizes common malformed or non-standard semver range strings encountered in real-world npm packages.
  * e.g. "7.x | 8.x" -> "7.x || 8.x"
+ * Defends against non-strings, numbers, huge strings, and non-semver prefixes.
  */
-export function normalizeRange(range: string): string {
+export function normalizeRange(range: unknown): string {
+  if (typeof range === 'number') {
+    return String(range);
+  }
+  if (typeof range !== 'string') {
+    return '';
+  }
+  // Defend against pathological ReDoS or huge strings
+  if (range.length > 2000) {
+    return '';
+  }
   let cleaned = range.trim();
+  if (cleaned === '') {
+    return '';
+  }
   // Single pipe used instead of double pipe (e.g. @swimlane/ngx-charts: "7.x | 8.x")
   cleaned = cleaned.replace(/(?<!\|)\|(?!\|)/g, '||');
   return cleaned;
@@ -14,9 +28,10 @@ export function normalizeRange(range: string): string {
 /**
  * Safely computes minVersion of a semver range string, returning null if invalid or cannot be parsed.
  */
-export function safeMinVersion(range: string): semver.SemVer | null {
+export function safeMinVersion(range: unknown): semver.SemVer | null {
   try {
     const normalized = normalizeRange(range);
+    if (!normalized) return null;
     return semver.minVersion(normalized);
   } catch {
     return null;
@@ -27,12 +42,12 @@ export function safeMinVersion(range: string): semver.SemVer | null {
  * Preserves the prefix style (^, ~, >=, <=, or exact) of the original spec
  * when updating to a target version.
  */
-export function preserveRangeStyle(targetVersion: string, originalSpec: string): string {
+export function preserveRangeStyle(targetVersion: string, originalSpec: unknown): string {
+  if (typeof originalSpec !== 'string') return targetVersion;
   const trimmed = originalSpec.trim();
   if (trimmed.startsWith('^')) return `^${targetVersion}`;
   if (trimmed.startsWith('~')) return `~${targetVersion}`;
   if (trimmed.startsWith('>=')) return `>=${targetVersion}`;
-  // If exact or other format, default to exact if original was exact, or keep prefix
   const match = /^([^\d]*)/.exec(trimmed);
   const prefix = match ? match[1]! : '';
   if (prefix === '') return targetVersion;
@@ -44,17 +59,17 @@ export function preserveRangeStyle(targetVersion: string, originalSpec: string):
  * If peerDependencies['@angular/core'] is present, checks if coreVersion satisfies it.
  */
 export function satisfiesAngularPeer(
-  peerDeps: Record<string, string> | undefined,
+  peerDeps: Record<string, unknown> | undefined,
   targetCoreVersion: string,
   targetMajor: number,
   candidateVersion?: string,
 ): boolean {
   if (!peerDeps) return true;
   const angularPeer = peerDeps['@angular/core'];
-  if (!angularPeer) return true;
+  if (angularPeer === undefined || angularPeer === null) return true;
 
   const normalizedPeer = normalizeRange(angularPeer);
-  if (!semver.validRange(normalizedPeer)) {
+  if (!normalizedPeer || !semver.validRange(normalizedPeer)) {
     return false;
   }
 
@@ -87,4 +102,3 @@ export function satisfiesAngularPeer(
 
   return false;
 }
-

@@ -161,6 +161,7 @@ export async function createPlan(options: PlanOptions): Promise<Plan> {
       actions,
       risks,
       breakingChangesUrl: `https://update.angular.io/?v=${fromMajor}.0-${toMajor}.0`,
+      ...(project.manifestLockfileDisagreement ? { manifestLockfileDisagreement: project.manifestLockfileDisagreement } : {}),
     });
   }
 

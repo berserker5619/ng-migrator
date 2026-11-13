@@ -131,6 +131,10 @@ export function createProgram(
         out.success(`Package manager: ${project.packageManager.name} (${project.packageManager.source})`);
         out.success(`Workspace structure: ${project.workspace}, style: ${project.style}`);
 
+        if (project.manifestLockfileDisagreement) {
+          out.warn(`⚠ Warning: Manifest vs lockfile disagreement: ${project.manifestLockfileDisagreement.reason}`);
+        }
+
         if (project.warnings.length > 0) {
           out.info('\nProject warnings:');
           for (const w of project.warnings) out.warn(`  - ${w}`);
@@ -186,13 +190,21 @@ export function createProgram(
       // report audit status and exit 0 (plan Section 19.3).
       if (opts.to === undefined && currentMajor >= maxPublishedMajor) {
         out.info(`Analyzing project: ${project.name ?? path.basename(projectRoot)}`);
-        out.success(`✔ Project is already on the latest Angular major (${currentMajor}). Auditing current dependencies only...\n`);
+        out.success(`✔ Project is already on the latest published major (${currentMajor}); nothing to upgrade.\n`);
+
+        if (project.manifestLockfileDisagreement) {
+          out.warn(`⚠ Warning: Manifest vs lockfile disagreement: ${project.manifestLockfileDisagreement.reason}\n`);
+        }
 
         out.info(`Dependencies analyzed: ${project.dependencies.length}`);
         out.info(`Proposed package updates: 0 (already on latest Angular)`);
         out.info(`Blockers detected: 0\n`);
         out.success('No dependency blockers found.');
         return;
+      }
+
+      if (project.manifestLockfileDisagreement) {
+        out.warn(`⚠ Warning: Manifest vs lockfile disagreement: ${project.manifestLockfileDisagreement.reason}\n`);
       }
 
       const targetMajor = opts.to ?? (currentMajor + 1);
@@ -328,6 +340,9 @@ export function createProgram(
         });
 
         const clock = getClock();
+        if (project.manifestLockfileDisagreement) {
+          out.warn(`⚠ Warning: Manifest vs lockfile disagreement: ${project.manifestLockfileDisagreement.reason}\n`);
+        }
         out.info(`Planning upgrade: Angular ${project.angular.version} -> ${targetMajor}...`);
         const plan = await createPlan({
           project,

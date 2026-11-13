@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import type { Plan, PlannedStep } from '../model.js';
+import type { EvidenceKind, Plan, PlannedStep } from '../model.js';
 import { pathExists } from '../platform/fs.js';
 import { writeGeneratedText } from '../platform/text.js';
 import {
@@ -34,6 +34,22 @@ export function generateDecisionId(packageName: string, category: string = 'bloc
   return `${category}-${slug}-${hash}`;
 }
 
+export function formatEvidence(evidence: EvidenceKind | string | undefined): string {
+  if (evidence === 'declared-compatible' || evidence === 'declared') {
+    return 'declared compatible';
+  }
+  if (evidence === 'declared-incompatible') {
+    return 'declared incompatible';
+  }
+  if (evidence === 'unknown') {
+    return 'unknown, verify by build';
+  }
+  if (evidence === 'verified') {
+    return 'verified by build';
+  }
+  return evidence ?? 'unknown, verify by build';
+}
+
 export function formatStepDocument(
   step: PlannedStep,
   stepState?: StepState,
@@ -47,6 +63,27 @@ export function formatStepDocument(
   lines.push('');
   lines.push(`Status: ${status} | Tool: ${TOOL_VERSION}`);
   lines.push('');
+
+  if (step.manifestLockfileDisagreement) {
+    const d = step.manifestLockfileDisagreement;
+    lines.push(
+      `> ⚠ **Manifest vs Lockfile Disagreement:** package.json declares \`@angular/core: "${d.declared}"\`, but the lockfile installs \`${d.installed}\`. This upgrade plan was anchored to the installed version (${d.installed}) to ensure that intermediate Angular migration schematics are executed and not skipped.`,
+    );
+    lines.push('');
+  }
+
+  if (!hasNodeModules) {
+    if (step.to === 16 || (step.from < 16 && step.to >= 16)) {
+      lines.push(
+        '> ⚠ **CRITICAL WARNING:** View Engine/ngcc check NOT performed (node_modules missing). Angular 16 permanently removed the View Engine / ngcc compiler. Any installed library still shipping View Engine metadata (.metadata.json) will fail to build in Angular 16. To perform this check: install dependencies with your package manager (e.g. `npm ci --ignore-scripts`) and re-run `ng-migrator plan --to 16`.',
+      );
+    } else {
+      lines.push(
+        '> ⚠ **Notice:** View Engine/ngcc check NOT performed (node_modules missing). To perform this check: install dependencies with your package manager (e.g. `npm ci --ignore-scripts`) and re-run `ng-migrator plan`.',
+      );
+    }
+    lines.push('');
+  }
 
   lines.push('## Requirements');
   if (step.requirements.node) lines.push(`- Node: ${step.requirements.node}`);
@@ -80,8 +117,11 @@ export function formatStepDocument(
       if (!hasNodeModules && !c.current) {
         cur = `${c.currentSpec} (installed version unknown, lockfile used)`;
       }
-      const evidenceLabel = c.evidence === 'verified' ? 'verified by build' : 'declared compatible';
-      lines.push(`| ${c.name} | ${cur} | ${c.target} | ${c.reason} | ${evidenceLabel} |`);
+      const targetDisplay = c.newestVersion && c.newestVersion !== c.target
+        ? `${c.target} (newest: ${c.newestVersion})`
+        : c.target;
+      const evidenceLabel = formatEvidence(c.evidence);
+      lines.push(`| ${c.name} | ${cur} | ${targetDisplay} | ${c.reason} | ${evidenceLabel} |`);
     }
   }
   lines.push('');
@@ -138,13 +178,17 @@ export function formatStepDocument(
         );
       }
       if (b.evidence) {
-        const evLabel = b.evidence === 'verified' ? 'verified by build' : 'declared compatible';
+        const evLabel = formatEvidence(b.evidence);
         lines.push(`- Evidence: ${evLabel}`);
       }
       if (b.chosenVersion) {
+        const newest = b.newestVersion && b.newestVersion !== b.chosenVersion ? ` (newest: ${b.newestVersion})` : '';
         lines.push(
-          `- Chosen version: ${b.chosenVersion}${b.chosenVersionReason ? ` (${b.chosenVersionReason})` : ''}`,
+          `- Chosen version: ${b.chosenVersion}${newest}${b.chosenVersionReason ? ` (${b.chosenVersionReason})` : ''}`,
         );
+      }
+      if (b.unknownExplanation) {
+        lines.push(`- Unknown evidence explanation: ${b.unknownExplanation}`);
       }
       if (b.recommendedFix) {
         lines.push(`- Recommended fix: ${b.recommendedFix}`);
