@@ -312,7 +312,10 @@ Measured on Windows on scratch copies after clearing `.ng-migrator/` (includes l
 | Project | Command | CLI Reported Elapsed | PowerShell `Measure-Command` | Notes |
 |---|---|---|---|---|
 | **`angular-14-login`** | `plan --to 17 --allow-dirty` | `24.55s` | `25095 ms` | 22 packages, 3 steps, live `npm` check |
-| **`ngx-admin`** | `plan --to 16 --allow-dirty` | `1m 25.7s` | `86371 ms` | 83 packages, 1 step, initial `npm` check + companion `echarts@5.6.0` re-check |
+| **`ngx-admin`** (single-ERESOLVE check) | `plan --to 16 --allow-dirty` | `1m 25.7s` | `86371 ms` | 83 packages, 1 step, initial `npm` check + companion `echarts@5.6.0` re-check |
+| **`ngx-admin`** (full conflict discovery) | `plan --to 16` | `1m 27.9s` | `88279 ms` | 83 packages, 1 step, `--legacy-peer-deps` + `npm ls --all --json` discovery + companion re-check (`echarts@5.6.0`, `jasmine-core@3.99.1`, `@types/node@14.18.63`) |
+
+> **Full Conflict Discovery Time Cost:** When `npm` exits with `ERESOLVE`, running `npm install --package-lock-only --legacy-peer-deps` followed by `npm ls --all --package-lock-only --json` inside the isolated temp directory discovers all invalid/missing peer relationships in one pass (instead of stopping at the first `ERESOLVE`). On `ngx-admin` (83 packages), this added ~`2s` (`88.3s` vs `85.7s`–`86.4s` total end-to-end) and is bounded by `maxConflictIterations` (default `3`, configurable in `ng-migrator.config.json`).
 
 ---
 

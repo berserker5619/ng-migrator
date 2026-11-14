@@ -66,5 +66,12 @@ describe('config', () => {
     expect(commandPrefixForStep({ commandPrefix: { '14': 'x' } }, 15)).toBeUndefined();
     expect(commandPrefixForStep({ commandPrefix: undefined }, 15)).toBeUndefined();
   });
+
+  it('validates and defaults maxConflictIterations', () => {
+    expect(resolveConfig({}, {}, {}).maxConflictIterations).toBe(3);
+    expect(validateFileConfig({ maxConflictIterations: 5 }).config.maxConflictIterations).toBe(5);
+    expect(() => validateFileConfig({ maxConflictIterations: 0 })).toThrow(/maxConflictIterations/);
+    expect(() => validateFileConfig({ maxConflictIterations: 1.5 })).toThrow(/maxConflictIterations/);
+  });
 });
 

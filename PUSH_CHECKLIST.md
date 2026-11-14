@@ -69,6 +69,22 @@ When the CI workflow runs on GitHub (`.github/workflows/ci.yml`), verify:
    - `npm run lint` passes with 0 ESLint errors/warnings.
    - `npm run typecheck` (`tsc --noEmit`) passes with 0 TypeScript diagnostics.
    - `npm run build` bundles `dist/cli.js` via `tsup` targeting `node22`.
-   - `npm test` runs all 151 Vitest tests across 17 test suites and passes.
+   - `npm test` runs all Vitest suites and passes.
 4. **Tarball Install Smoke Test:**
-   - The final smoke step creates a fresh temp directory, runs `npm pack`, installs the `.tgz` package into an isolated consumer project, and verifies `npx ng-migrator --version` outputs `1.1.0` and `npx ng-migrator --help` succeeds without missing dependencies.
+   - The final smoke step creates a fresh temp directory, runs `npm pack`, installs the `.tgz` package into an isolated consumer project, and verifies `npx ng-migrator --version` outputs `1.1.2` and `npx ng-migrator --help` succeeds without missing dependencies.
+
+---
+
+## 6. Choosing a Git Author Email for a Public Repository
+
+Before pushing commits to a public GitHub repository, check `git log -1 --format="%an <%ae>"` to confirm you are not exposing a personal or internal email address you prefer to keep private:
+
+- **GitHub noreply option**: In GitHub **Settings -> Emails**, enable *"Keep my email addresses private"* and note your noreply address (`<id>+<username>@users.noreply.github.com`).
+- **Configure locally for this repo only** (if desired, before committing or amending):
+  ```bash
+  git config --local user.email "<id>+<username>@users.noreply.github.com"
+  ```
+- **Update the last local unpushed commit** (if already committed with a different email):
+  ```bash
+  git commit --amend --reset-author --no-edit
+  ```

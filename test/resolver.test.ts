@@ -15,6 +15,7 @@ import {
   detectYarnLockfileFlavor,
   enrichBlockersWithResolutionCheck,
   parseNpmEresolve,
+  parseNpmLsConflicts,
   parsePeerConflicts,
   parseYarnVersionFlavor,
   pruneYarnLockEntries,
@@ -2251,6 +2252,159 @@ describe('Manifest vs Lockfile Disagreement and View Engine Warnings', () => {
     const failBlockers: import('../src/model.js').Blocker[] = [];
     enrichBlockersWithResolutionCheck(failBlockers, stillFails.resolutionCheck, project, 16, 'npm');
     expect(failBlockers.some((b) => b.package === 'ngx-echarts' && b.reason === 'peer-conflict' && b.hard)).toBe(true);
+  });
+
+  it('ignores satisfied Found: tree lines in npm ERESOLVE and discovers all 3 independent conflicts in one pass', async () => {
+    const fixtureRaw = await readFile(
+      path.join(process.cwd(), 'test/fixtures/resolution/npm-multi-conflict-discovery.json'),
+      'utf8',
+    );
+    const fixture = JSON.parse(fixtureRaw) as {
+      eresolveStderr: string;
+      npmLsJson: unknown;
+      lockfileJson: unknown;
+    };
+
+    // 1. parsePeerConflicts must skip @angular/cdk and @nebular/theme inside the Found: tree
+    const initialParsed = parsePeerConflicts(fixture.eresolveStderr);
+    expect(initialParsed).toEqual([
+      {
+        peer: '@angular/common',
+        range: '^10.0.0',
+        requiredBy: 'ng2-smart-table@1.7.2',
+        found: '@angular/common@16.2.12',
+      },
+    ]);
+
+    // 2. parseNpmLsConflicts discovers all 3 conflicts from --legacy-peer-deps + npm ls
+    const lsConflicts = parseNpmLsConflicts(fixture.npmLsJson, fixture.lockfileJson);
+    expect(lsConflicts).toHaveLength(3);
+    expect(lsConflicts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ peer: 'echarts', range: '>=5.0.0', requiredBy: 'ngx-echarts@16.2.0', found: 'echarts@4.9.0' }),
+        expect.objectContaining({ peer: '@angular/common', range: '^10.0.0', requiredBy: 'ng2-smart-table@1.7.2', found: '@angular/common@16.2.12' }),
+        expect.objectContaining({ peer: '@angular/cdk', range: '^14.0.0', requiredBy: 'ngx-legacy-grid@2.0.0', found: '@angular/cdk@16.2.14' }),
+      ]),
+    );
+
+    // 3. End-to-end verifyWithPackageManager -> resolveFixablePeerConflicts -> enrichBlockersWithResolutionCheck
+    const { dir, cleanup } = await tempProject();
+    try {
+      await writeFile(
+        path.join(dir, 'package.json'),
+        JSON.stringify({
+          name: 'multi-conflict-app',
+          dependencies: {
+            '@angular/common': '^16.2.12',
+            '@angular/cdk': '^16.2.14',
+            '@nebular/theme': '12.0.0',
+            echarts: '^4.9.0',
+            'ngx-echarts': '^16.2.0',
+            'ng2-smart-table': '^1.6.0',
+            'ngx-legacy-grid': '^2.0.0',
+          },
+        }),
+      );
+
+      let installStep = 0;
+      const runMock: typeof proc.run = async (cmd, args, opts) => {
+        const joined = `${cmd} ${args.join(' ')}`;
+        if (args[0] === 'install' && args.includes('--dry-run')) {
+          installStep++;
+          return {
+            command: joined,
+            exitCode: 1,
+            stdout: '',
+            stderr: fixture.eresolveStderr,
+            timedOut: false,
+            failed: true,
+          };
+        }
+        if (args[0] === 'install' && args.includes('--legacy-peer-deps')) {
+          await writeFile(path.join(opts!.cwd!, 'package-lock.json'), JSON.stringify(fixture.lockfileJson));
+          return { command: joined, exitCode: 0, stdout: '', stderr: '', timedOut: false, failed: false };
+        }
+        if (args[0] === 'ls') {
+          const problems =
+            installStep === 1
+              ? (fixture.npmLsJson as { problems: string[] }).problems
+              : [
+                  'invalid: @angular/common@16.2.12 /tmp/ngm/node_modules/@angular/common',
+                  'invalid: @angular/cdk@16.2.14 /tmp/ngm/node_modules/@angular/cdk',
+                ];
+          return {
+            command: joined,
+            exitCode: 1,
+            stdout: JSON.stringify({ name: 'multi-conflict-app', problems }),
+            stderr: '',
+            timedOut: false,
+            failed: true,
+          };
+        }
+        return { command: joined, exitCode: 0, stdout: '', stderr: '', timedOut: false, failed: false };
+      };
+
+      const initialCheck = await verifyWithPackageManager({
+        projectRoot: dir,
+        packageManager: 'npm',
+        changes: [],
+        runFn: runMock,
+      });
+      expect(initialCheck.status).toBe('conflict');
+      expect(initialCheck.conflicts).toHaveLength(3);
+
+      const registry = {
+        async packument(name: string): Promise<Packument | null> {
+          if (name === 'echarts') {
+            return {
+              name: 'echarts',
+              distTags: { latest: '5.6.0' },
+              versions: { '4.9.0': { version: '4.9.0' }, '5.6.0': { version: '5.6.0' } },
+              time: { '4.9.0': '2020-08-26T00:00:00.000Z', '5.6.0': '2024-12-20T00:00:00.000Z' },
+            };
+          }
+          return null;
+        },
+      } as unknown as RegistryClient;
+
+      const project: ProjectInfo = {
+        root: dir,
+        packageManager: { name: 'npm', source: 'default' },
+        angular: { version: '16.2.12', major: 16, source: 'lockfile' },
+        dependencies: [
+          { name: 'echarts', declared: '^4.9.0', installed: '4.9.0', type: 'dependencies' },
+          { name: 'ngx-echarts', declared: '^16.2.0', installed: '16.2.0', type: 'dependencies' },
+          { name: 'ng2-smart-table', declared: '^1.6.0', installed: '1.7.2', type: 'dependencies' },
+          { name: 'ngx-legacy-grid', declared: '^2.0.0', installed: '2.0.0', type: 'dependencies' },
+        ],
+        ngccScripts: [],
+      } as unknown as ProjectInfo;
+
+      const resolved = await resolveFixablePeerConflicts({
+        project,
+        registry,
+        packageManager: 'npm',
+        changes: [],
+        resolutionCheck: initialCheck,
+        maxIterations: 2,
+        verifyFn: (opts) => verifyWithPackageManager({ ...opts, runFn: runMock }),
+      });
+
+      // Fixable companion upgrade (echarts -> 5.6.0) is retained, while the 2 unfixable conflicts remain
+      expect(resolved.changes.find((c) => c.name === 'echarts')?.target).toBe('5.6.0');
+      expect(resolved.companionNotes).toHaveLength(1);
+      expect(resolved.resolutionCheck.conflicts).toHaveLength(2);
+
+      const blockers: import('../src/model.js').Blocker[] = [];
+      enrichBlockersWithResolutionCheck(blockers, resolved.resolutionCheck, project, 16, 'npm');
+      expect(blockers.map((b) => b.package).sort()).toEqual(['ng2-smart-table', 'ngx-legacy-grid']);
+      const smartTableBlocker = blockers.find((b) => b.package === 'ng2-smart-table')!;
+      const gridBlocker = blockers.find((b) => b.package === 'ngx-legacy-grid')!;
+      expect(smartTableBlocker.details).toContain('Conflict origin: third-party peer requirement from ng2-smart-table@1.7.2 (@angular/common@"^10.0.0")');
+      expect(gridBlocker.details).toContain('Conflict origin: third-party peer requirement from ngx-legacy-grid@2.0.0 (@angular/cdk@"^14.0.0")');
+    } finally {
+      await cleanup();
+    }
   });
 });
 

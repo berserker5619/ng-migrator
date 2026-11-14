@@ -229,8 +229,8 @@
           "step": 1,
           "from": 15,
           "to": 16,
-          "blockerCount": 6,
-          "noteCount": 6,
+          "blockerCount": 11,
+          "noteCount": 9,
           "blockers": [
             {
               "package": "@asymmetrik/ngx-leaflet",
@@ -273,6 +273,41 @@
               "hard": true,
               "highRisk": false,
               "evidence": "declared-incompatible"
+            },
+            {
+              "package": "ng2-smart-table",
+              "reason": "peer-conflict",
+              "hard": true,
+              "highRisk": false,
+              "evidence": null
+            },
+            {
+              "package": "codelyzer",
+              "reason": "peer-conflict",
+              "hard": true,
+              "highRisk": false,
+              "evidence": null
+            },
+            {
+              "package": "tslint-language-service",
+              "reason": "peer-conflict",
+              "hard": true,
+              "highRisk": false,
+              "evidence": null
+            },
+            {
+              "package": "bootstrap",
+              "reason": "peer-conflict",
+              "hard": true,
+              "highRisk": false,
+              "evidence": null
+            },
+            {
+              "package": "ng2-ckeditor",
+              "reason": "peer-conflict",
+              "hard": true,
+              "highRisk": false,
+              "evidence": null
             }
           ],
           "notes": [
@@ -311,6 +346,24 @@
               "kind": "ivy-upgrade",
               "severity": "note",
               "evidence": "unknown"
+            },
+            {
+              "package": "echarts",
+              "kind": "companion-upgrade",
+              "severity": "note",
+              "evidence": "declared-compatible"
+            },
+            {
+              "package": "jasmine-core",
+              "kind": "companion-upgrade",
+              "severity": "note",
+              "evidence": "declared-compatible"
+            },
+            {
+              "package": "@types/node",
+              "kind": "companion-upgrade",
+              "severity": "note",
+              "evidence": "declared-compatible"
             }
           ]
         }

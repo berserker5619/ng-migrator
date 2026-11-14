@@ -18,6 +18,7 @@ export interface PlanOptions {
   registry: RegistryClient;
   config: ResolvedConfig;
   verifyResolution?: boolean;
+  verifyFn?: typeof verifyWithPackageManager;
   onNotice?: (message: string) => void;
   onProgress?: (message: string) => void;
   now?: number;
@@ -25,7 +26,18 @@ export interface PlanOptions {
 }
 
 export async function createPlan(options: PlanOptions): Promise<Plan> {
-  const { project, targetMajor, registry, config, verifyResolution = true, onNotice, onProgress, now, clock } = options;
+  const {
+    project,
+    targetMajor,
+    registry,
+    config,
+    verifyResolution = true,
+    verifyFn = verifyWithPackageManager,
+    onNotice,
+    onProgress,
+    now,
+    clock,
+  } = options;
 
   const currentVersion = project.angular.version;
   const currentMajor = project.angular.major;
@@ -92,7 +104,7 @@ export async function createPlan(options: PlanOptions): Promise<Plan> {
     let resolutionCheck: ResolutionCheck = { status: 'skipped', packageManager: config.packageManager };
     if (verifyResolution && isFirstStep) {
       onProgress?.(`Checking resolution with ${config.packageManager} (this can take a minute)`);
-      resolutionCheck = await verifyWithPackageManager({
+      resolutionCheck = await verifyFn({
         projectRoot: project.root,
         packageManager: config.packageManager,
         changes: stepResolution.changes,
@@ -108,8 +120,10 @@ export async function createPlan(options: PlanOptions): Promise<Plan> {
       changes: stepResolution.changes,
       resolutionCheck,
       timeoutMs: config.resolutionTimeoutMs,
+      maxIterations: config.maxConflictIterations,
       pinned: config.pinned,
       neverTouch: config.neverTouch,
+      verifyFn,
       ...(onProgress ? { onNotice: onProgress } : onNotice ? { onNotice } : {}),
     });
     stepResolution.changes = fixableResolution.changes;

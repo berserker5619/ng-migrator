@@ -8,6 +8,7 @@ import type { ProjectInfo } from '../src/model.js';
 import { run } from '../src/platform/process.js';
 import { createPlan } from '../src/planner/plan.js';
 import type { Packument, RegistryClient } from '../src/registry/client.js';
+import { verifyWithPackageManager } from '../src/resolver/verify.js';
 
 interface GoldenStepExpectation {
   step: number;
@@ -112,12 +113,79 @@ describe('Offline golden regression suite', () => {
         root: tempRoot,
       };
 
+      const ngxAdminConflicts =
+        name === 'ngx-admin'
+          ? (JSON.parse(
+              await fs.readFile(path.join(REPO_ROOT, 'test/fixtures/resolution/ngx-admin-ng16-conflicts.json'), 'utf8'),
+            ) as {
+              initialEresolveStderr: string;
+              recheckEresolveStderr: string;
+              initialNpmLsJson: unknown;
+              recheckNpmLsJson: unknown;
+              lockfileJson: unknown;
+            })
+          : undefined;
+
+      if (ngxAdminConflicts) {
+        const deps: Record<string, string> = {};
+        const devDeps: Record<string, string> = {};
+        for (const d of project.dependencies) {
+          if (d.type === 'devDependencies') devDeps[d.name] = d.declared;
+          else deps[d.name] = d.declared;
+        }
+        await fs.writeFile(
+          path.join(tempRoot, 'package.json'),
+          JSON.stringify({ name: 'ngx-admin', version: '11.0.0', dependencies: deps, devDependencies: devDeps }),
+          'utf8',
+        );
+      }
+
+      let installPass = 0;
+      const runMock: typeof run | undefined = ngxAdminConflicts
+        ? async (cmd, args, opts) => {
+            const joined = `${cmd} ${args.join(' ')}`;
+            if (cmd === 'npm' && args[0] === 'install' && args.includes('--dry-run')) {
+              installPass++;
+              return {
+                command: joined,
+                exitCode: 1,
+                stdout: '',
+                stderr: installPass === 1 ? ngxAdminConflicts.initialEresolveStderr : ngxAdminConflicts.recheckEresolveStderr,
+                timedOut: false,
+                failed: true,
+              };
+            }
+            if (cmd === 'npm' && args[0] === 'install' && args.includes('--legacy-peer-deps')) {
+              await fs.writeFile(
+                path.join(opts!.cwd!, 'package-lock.json'),
+                JSON.stringify(ngxAdminConflicts.lockfileJson),
+                'utf8',
+              );
+              return { command: joined, exitCode: 0, stdout: '', stderr: '', timedOut: false, failed: false };
+            }
+            if (cmd === 'npm' && args[0] === 'ls') {
+              return {
+                command: joined,
+                exitCode: 1,
+                stdout: JSON.stringify(
+                  installPass === 1 ? ngxAdminConflicts.initialNpmLsJson : ngxAdminConflicts.recheckNpmLsJson,
+                ),
+                stderr: '',
+                timedOut: false,
+                failed: true,
+              };
+            }
+            return { command: joined, exitCode: 0, stdout: '', stderr: '', timedOut: false, failed: false };
+          }
+        : undefined;
+
       const plan = await createPlan({
         project,
         targetMajor: expected.targetMajor,
         registry: fakeRegistry,
         config: resolveConfig({}, {}, { packageManager: project.packageManager.name }),
-        verifyResolution: false,
+        verifyResolution: Boolean(ngxAdminConflicts),
+        ...(runMock ? { verifyFn: (opts) => verifyWithPackageManager({ ...opts, runFn: runMock }) } : {}),
         now: fixedNow,
         clock: fixedClock,
       });

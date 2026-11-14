@@ -19,6 +19,8 @@ export interface FileConfig {
   unmaintainedThresholdMonths?: number;
   /** Timeout in milliseconds for package-manager resolution checks (default: 300000 = 5 minutes). */
   resolutionTimeoutMs?: number;
+  /** Maximum iterations for resolving fixable peer conflicts via companion upgrades (default: 3). */
+  maxConflictIterations?: number;
   /** One prefix for every step, or a map keyed by the step's target major n. */
   commandPrefix?: string | Record<string, string>;
 }
@@ -44,6 +46,7 @@ export interface ResolvedConfig {
   cacheDir: string;
   unmaintainedThresholdMonths: number;
   resolutionTimeoutMs: number;
+  maxConflictIterations: number;
   commandPrefix: string | Record<string, string> | undefined;
 }
 
@@ -57,6 +60,7 @@ const KNOWN_KEYS = new Set([
   'cacheDir',
   'unmaintainedThresholdMonths',
   'resolutionTimeoutMs',
+  'maxConflictIterations',
   'commandPrefix',
 ]);
 
@@ -125,6 +129,12 @@ export function validateFileConfig(raw: unknown): { config: FileConfig; warnings
     }
     c.resolutionTimeoutMs = raw.resolutionTimeoutMs;
   }
+  if (raw.maxConflictIterations !== undefined) {
+    if (typeof raw.maxConflictIterations !== 'number' || !Number.isInteger(raw.maxConflictIterations) || raw.maxConflictIterations <= 0) {
+      fail('maxConflictIterations', 'a positive integer');
+    }
+    c.maxConflictIterations = raw.maxConflictIterations;
+  }
   if (raw.commandPrefix !== undefined) {
     const p = raw.commandPrefix;
     if (typeof p === 'string') c.commandPrefix = p;
@@ -159,6 +169,7 @@ export function resolveConfig(flags: FlagConfig, file: FileConfig = {}, detected
     cacheDir: f.cacheDir ?? '.ng-migrator/cache',
     unmaintainedThresholdMonths: f.unmaintainedThresholdMonths ?? 18,
     resolutionTimeoutMs: f.resolutionTimeoutMs ?? 300_000,
+    maxConflictIterations: f.maxConflictIterations ?? 3,
     commandPrefix: f.commandPrefix,
   };
 }
