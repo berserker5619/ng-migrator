@@ -2571,13 +2571,66 @@ describe('Manifest vs Lockfile Disagreement and View Engine Warnings', () => {
 
     const baseNotes = baselineNotesForResolutionCheck({
       status: 'conflict',
-      preExistingConflicts: classified.preExisting,
+      preExistingConflicts: [
+        ...classified.preExisting,
+        { peer: 'popper.js', range: '^1.14.7', requiredBy: 'bootstrap@4.3.1' },
+      ],
       resolvedConflicts: classified.resolved,
     });
-    expect(baseNotes.find((n) => n.kind === 'pre-existing-conflict')?.message).toContain(
-      'already present at the current versions; not caused by this step',
-    );
+    const preNote = baseNotes.find((n) => n.kind === 'pre-existing-conflict');
+    expect(baseNotes.filter((n) => n.kind === 'pre-existing-conflict')).toHaveLength(1);
+    expect(preNote?.message).toContain('already present at the current versions; not caused by this step');
+    expect(preNote?.message).toContain('jquery');
+    expect(preNote?.message).toContain('popper.js');
     expect(baseNotes.find((n) => n.kind === 'resolved-conflict')?.package).toBe('old-pkg');
+
+    // Missing peer with a satisfying registry release emits an add-missing-peer note (dev-only for @types/*) instead of a hard blocker;
+    // missing peer with no satisfying release stays a hard peer-conflict blocker.
+    const missingPeerRegistry = {
+      async packument(name: string): Promise<Packument | null> {
+        if (name === '@types/ckeditor') {
+          return {
+            name: '@types/ckeditor',
+            distTags: { latest: '4.9.10' },
+            versions: { '4.9.10': { version: '4.9.10' } },
+            time: {},
+          };
+        }
+        return null;
+      },
+    } as unknown as RegistryClient;
+    const missingPeerProject = {
+      root: process.cwd(),
+      packageManager: { name: 'npm', source: 'default' },
+      angular: { version: '16.2.12', major: 16, source: 'lockfile' },
+      dependencies: [{ name: 'ng2-ckeditor', declared: '~1.2.9', installed: '1.2.9', type: 'dependencies' }],
+      ngccScripts: [],
+    } as unknown as ProjectInfo;
+    const missingPeerRes = await resolveFixablePeerConflicts({
+      project: missingPeerProject,
+      registry: missingPeerRegistry,
+      packageManager: 'npm',
+      changes: [],
+      resolutionCheck: {
+        status: 'conflict',
+        packageManager: 'npm',
+        conflicts: [
+          { peer: '@types/ckeditor', range: '^4.9.10', requiredBy: 'ng2-ckeditor@1.3.7' },
+          { peer: 'nonexistent-peer', range: '^99.0.0', requiredBy: 'ng2-ckeditor@1.3.7' },
+        ],
+      },
+    });
+    expect(missingPeerRes.companionNotes).toEqual([
+      expect.objectContaining({
+        package: '@types/ckeditor',
+        kind: 'add-missing-peer',
+        dependencyKind: 'dev-only',
+        target: '4.9.10',
+      }),
+    ]);
+    expect(missingPeerRes.resolutionCheck.conflicts).toEqual([
+      { peer: 'nonexistent-peer', range: '^99.0.0', requiredBy: 'ng2-ckeditor@1.3.7' },
+    ]);
 
     const grouped = groupBlockersByPackage([
       { package: 'codelyzer', reason: 'no-compatible-version', hard: true, details: 'No compatible release.' },

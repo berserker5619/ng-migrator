@@ -1,63 +1,43 @@
-# Release Checklist (`1.1.0`)
+# Release Checklist
 
-## 1. Package Name Check
-- **Status:** `complete` (confirmed on npm: `ng-migrator`).
-- **Current version in `package.json`:** `1.1.0`.
-- **Action before publishing:** Confirm final package name (`ng-migrator` or scoped name) and update `package.json`, `README.md`, and npm Trusted Publisher settings if changed.
+Use this checklist when publishing a new version of `ng-migrator` via `.github/workflows/release.yml`.
 
-## 2. License File (`LICENSE`)
-- **Status:** `pending user confirmation`.
-- **Current file:** [`LICENSE`](./LICENSE) (currently MIT template from initial repository scaffold; `package.json` `"license": "MIT"`).
-- **Decision required:** Confirm which license you want (`MIT`, `Apache-2.0`, `BSD-3-Clause`, or another license) so `LICENSE` and `package.json` match your choice.
+---
 
-## 3. Security Policy (`SECURITY.md`)
-- **Status:** `complete` — [`SECURITY.md`](./SECURITY.md).
-- **Covers:** Supported versions (`0.1.x` on Node `22`, `24`, `26`), private vulnerability reporting via GitHub Security Advisories, and non-destructive runtime security guarantees (never writes outside `.ng-migrator/`, never executes lifecycle scripts during temp-dir resolution checks via `--ignore-scripts`, and never runs git write commands).
+## 1. GitHub `npm-publish` Environment Setup
 
-## 4. Changelog (`CHANGELOG.md`)
-- **Status:** `complete` — [`CHANGELOG.md`](./CHANGELOG.md).
-- **Covers:** `1.1.0` release (`doctor`, `analyze`, `plan`, `status`, `approve`), safety guarantees, multi-package-manager peer conflict parsing (`npm`, `pnpm`, `yarn` Classic `1.x` and Berry `2+`), `--project <path>`, `--as-of <date>`, and `NGM-*` troubleshooting documentation.
+1. Open your GitHub repository **Settings -> Environments** and create an environment named **`npm-publish`**.
+2. Enable **Required reviewers** and add yourself (or release maintainers) so every `publish` job pauses for manual approval before publishing to npm.
+3. Optionally restrict **Deployment branches and tags** to `v*` tags and `main`.
 
-## 5. `npm pack` Contents Check
-Verified with `npm pack --dry-run`:
+---
 
-```text
-npm notice
-npm notice package: ng-migrator@1.1.0
-npm notice Tarball Contents
-npm notice 3.9kB CHANGELOG.md
-npm notice 1.1kB LICENSE
-npm notice 6.5kB README.md
-npm notice 135.9kB dist/cli.js
-npm notice 1.4kB package.json
-npm notice Tarball Details
-npm notice name: ng-migrator
-npm notice version: 1.1.0
-npm notice filename: ng-migrator-1.1.0.tgz
-npm notice package size: 40.5 kB
-npm notice unpacked size: 148.8 kB
-npm notice total files: 5
-```
+## 2. Granular npm Access Token (Scoped & Expiring)
 
-- **Source maps decision:** Excluded from the published npm package (`sourcemap: false` in `tsup.config.ts`).
-- Only `dist/`, `README.md`, `CHANGELOG.md`, `LICENSE`, and `package.json` are included (`"files": ["dist"]` in `package.json`).
-- No `test/`, `corpus/`, `src/`, or `.ng-migrator/` artifacts are leaked into the published tarball.
+1. Sign in to [npmjs.com](https://www.npmjs.com/) -> **Access Tokens -> Generate New Token -> Granular Access Token**.
+2. Set a short **Expiration** (for example, 30 or 90 days).
+3. Under **Packages and scopes**, choose **Read and write** and restrict access strictly to the single package **`ng-migrator`**.
+4. Save the token as an environment secret named **`NPM_TOKEN`** inside the **`npm-publish`** GitHub environment (never at the org level or committed to the repo).
+5. `.github/workflows/release.yml` passes `${{ secrets.NPM_TOKEN }}` via `NODE_AUTH_TOKEN` with `actions/setup-node` (`registry-url: 'https://registry.npmjs.org'`), avoiding writing credentials to `~/.npmrc`.
 
-## 6. Fresh-Machine Install Test (Windows, macOS, Linux)
-- **Windows (verified locally on Windows / Node `v24.19.0`):**
-  1. Packed `ng-migrator-1.1.0.tgz` via `npm pack` into an isolated OS temp directory.
-  2. Installed into a clean consumer folder (`npm install --no-save --ignore-scripts --no-audit --no-fund ng-migrator-1.1.0.tgz`).
-  3. Verified `ng-migrator --version` (`1.1.0`) and `ng-migrator --help` (lists only `doctor`, `analyze`, `plan`, `status`, `approve`; no `migrate` command).
-  4. Removed the temporary directory (`PACK TEMP DIR CLEANED: true`).
-- **macOS (`macos-latest`) and Linux (`ubuntu-latest`) (plus `windows-latest`):**
-  - Configured in [`.github/workflows/ci.yml`](./.github/workflows/ci.yml) across `os: [ubuntu-latest, macos-latest, windows-latest]` and `node: [22, 24, 26]`.
-  - Runs fresh-install smoke check on all three OSes in CI upon push.
+---
 
-## 7. Provenance & Trusted Publishing Notes
-- **Workflow:** [`.github/workflows/release.yml`](./.github/workflows/release.yml) triggers on `v*` tags (`v1.1.0`).
-- **Pinned GitHub Actions:** All workflow actions in `ci.yml`, `nightly.yml`, and `release.yml` are pinned by full 40-character commit SHA with version comments (`actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1`, `actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0`).
-- **OIDC Trusted Publishing & Provenance:**
-  - `release.yml` declares `permissions: contents: read, id-token: write`.
-  - Runs `npm publish --provenance --access public` on Node `24` (npm `11+`), which uses OpenID Connect (OIDC) Trusted Publishing without long-lived `NPM_TOKEN` secrets when Trusted Publisher is configured on npmjs.com for the repository and `release.yml` workflow.
-  - Ensure the repository URL in `package.json` (`repository.url`) matches the GitHub `owner/repo` configured in npm Trusted Publisher settings so provenance attestation verification succeeds.
+## 3. Optional: npm Trusted Publishing (OIDC) Instead of a Token
 
+If you prefer keyless OIDC publishing instead of `NPM_TOKEN`:
+
+1. On npmjs.com, open **`ng-migrator` -> Settings -> Trusted Publisher -> GitHub Actions**.
+2. Configure:
+   - **Owner**: `berserker5619`
+   - **Repository**: `ng-migrator`
+   - **Workflow filename**: `release.yml`
+   - **Environment**: `npm-publish`
+3. Remove `NPM_TOKEN` from `npm-publish`. Because the `publish` job grants `id-token: write` and runs `npm publish --provenance --access public --tag <dist-tag>`, npm authenticates via GitHub OIDC automatically.
+
+---
+
+## 4. Pre-Release & Dispatch Steps
+
+1. Run `npm run check` locally and confirm `package.json` version matches the tag you plan to push (`v<version>`).
+2. Test first using **Actions -> Release & Publish -> Run workflow** with `dry_run: true` (the default) and `tag: v<version>`.
+3. Once verified, push the tag `git push origin v<version>` (or run `workflow_dispatch` with `dry_run: false`) and approve the `npm-publish` environment gate.

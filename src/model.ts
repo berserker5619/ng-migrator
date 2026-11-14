@@ -65,7 +65,7 @@ export type EvidenceKind =
 
 export interface StepNote {
   package: string;
-  kind: 'verify-by-build' | 'ivy-upgrade' | 'companion-upgrade' | 'pre-existing-conflict' | 'resolved-conflict';
+  kind: 'verify-by-build' | 'ivy-upgrade' | 'companion-upgrade' | 'add-missing-peer' | 'pre-existing-conflict' | 'resolved-conflict';
   severity: 'note';
   evidence: EvidenceKind;
   dependencyKind?: 'runtime' | 'dev-only';

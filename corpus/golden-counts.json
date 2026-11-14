@@ -230,7 +230,7 @@
           "from": 15,
           "to": 16,
           "blockerCount": 6,
-          "noteCount": 17,
+          "noteCount": 14,
           "blockers": [
             {
               "package": "@asymmetrik/ngx-leaflet",
@@ -255,8 +255,8 @@
             },
             {
               "package": "ng2-ckeditor",
-              "reason": "ivy-or-ngcc + peer-conflict",
-              "hard": true,
+              "reason": "ivy-or-ngcc",
+              "hard": false,
               "highRisk": true,
               "evidence": "unknown"
             },
@@ -331,10 +331,10 @@
               "evidence": "declared-compatible"
             },
             {
-              "package": "ng2-smart-table",
-              "kind": "pre-existing-conflict",
+              "package": "@types/ckeditor",
+              "kind": "add-missing-peer",
               "severity": "note",
-              "evidence": "verified"
+              "evidence": "declared-compatible"
             },
             {
               "package": "ng2-smart-table",
@@ -349,25 +349,7 @@
               "evidence": "verified"
             },
             {
-              "package": "ng2-smart-table",
-              "kind": "pre-existing-conflict",
-              "severity": "note",
-              "evidence": "verified"
-            },
-            {
               "package": "tslint-language-service",
-              "kind": "pre-existing-conflict",
-              "severity": "note",
-              "evidence": "verified"
-            },
-            {
-              "package": "tslint-language-service",
-              "kind": "pre-existing-conflict",
-              "severity": "note",
-              "evidence": "verified"
-            },
-            {
-              "package": "bootstrap",
               "kind": "pre-existing-conflict",
               "severity": "note",
               "evidence": "verified"

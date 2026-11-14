@@ -6,6 +6,10 @@ on:
       - 'v*'
   workflow_dispatch:
     inputs:
+      tag:
+        description: 'Git tag to publish (must match v<package.json version>, e.g. v1.2.0)'
+        required: true
+        type: string
       npm_tag:
         description: 'npm dist-tag to publish to (default: next; set to latest for stable)'
         required: true
@@ -14,74 +18,94 @@ on:
         options:
           - next
           - latest
+      dry_run:
+        description: 'Run npm publish --dry-run instead of publishing'
+        required: true
+        default: true
+        type: boolean
 
 permissions:
-  contents: write
-  id-token: write
+  contents: read
 
 jobs:
+  test:
+    name: Test (${{ matrix.os }} / Node 22)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref }}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+
   publish:
+    name: Publish to npm
+    needs: test
     runs-on: ubuntu-latest
-    environment: npm
+    environment: npm-publish
     permissions:
-      contents: write
+      contents: read
       id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref }}
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
+          registry-url: 'https://registry.npmjs.org'
+          cache: npm
 
-      - name: Upgrade npm to latest
-        run: npm install -g npm@latest
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Verify build, lint, and tests
-        run: npm run check
-
-      - name: Guard against duplicate publish and determine npm dist-tag
-        id: prep
+      - name: Verify tag matches package.json version
+        id: verify
         run: |
           PKG_VERSION=$(node -p "require('./package.json').version")
-          echo "Package version in manifest: $PKG_VERSION"
-          if npm view "ng-migrator@$PKG_VERSION" version --json >/dev/null 2>&1; then
-            echo "::error::Version $PKG_VERSION is already published on npm! Bump version before releasing."
+          EXPECTED_TAG="v${PKG_VERSION}"
+          ACTUAL_TAG="${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}"
+          echo "Manifest version: $PKG_VERSION | Expected tag: $EXPECTED_TAG | Actual tag: $ACTUAL_TAG"
+          if [ "$ACTUAL_TAG" != "$EXPECTED_TAG" ]; then
+            echo "::error::Tag '$ACTUAL_TAG' does not match package.json version '$EXPECTED_TAG'!"
             exit 1
           fi
-          # Default to 'next' tag unless workflow_dispatch explicitly chose 'latest'
-          DIST_TAG="${{ github.event.inputs.npm_tag || 'next' }}"
-          echo "publish_tag=$DIST_TAG" >> "$GITHUB_OUTPUT"
-          echo "Publishing ng-migrator@$PKG_VERSION with dist-tag: $DIST_TAG"
+          echo "pkg_version=$PKG_VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Install dependencies and build
         run: |
-          gh release create "${{ github.ref_name }}" \
-            --title "Release ${{ github.ref_name }}" \
-            --generate-notes || echo "Release already exists, continuing..."
-        env:
-          GH_TOKEN: ${{ github.token }}
+          npm ci
+          npm run build
 
-      - name: Check OIDC environment
+      - name: Guard against duplicate publish and determine dist-tag
+        id: prep
         run: |
-          if [ -n "$ACTIONS_ID_TOKEN_REQUEST_URL" ]; then
-            echo "GitHub Actions OIDC token provider is available."
-          else
-            echo "WARNING: ACTIONS_ID_TOKEN_REQUEST_URL is empty!"
+          PKG_VERSION="${{ steps.verify.outputs.pkg_version }}"
+          if npm view "ng-migrator@${PKG_VERSION}" version --json >/dev/null 2>&1; then
+            echo "::error::Version ${PKG_VERSION} is already published on npm! Bump version before releasing."
+            exit 1
           fi
+          DIST_TAG="${{ github.event.inputs.npm_tag || 'next' }}"
+          DRY_RUN="${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run || 'false' }}"
+          echo "publish_tag=${DIST_TAG}" >> "$GITHUB_OUTPUT"
+          echo "dry_run=${DRY_RUN}" >> "$GITHUB_OUTPUT"
+          echo "Target: ng-migrator@${PKG_VERSION} | dist-tag: ${DIST_TAG} | dry_run: ${DRY_RUN}"
 
       - name: Publish package to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          if [ -n "${{ secrets.NPM_TOKEN }}" ]; then
-            echo "Publishing via NPM_TOKEN..."
-            echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" >> ~/.npmrc
-            npm publish --access public --tag "${{ steps.prep.outputs.publish_tag }}"
+          if [ "${{ steps.prep.outputs.dry_run }}" = "true" ]; then
+            echo "Running npm publish --dry-run..."
+            npm publish --dry-run --provenance --access public --tag "${{ steps.prep.outputs.publish_tag }}"
           else
-            echo "Publishing via OIDC Trusted Publishing with provenance..."
             npm publish --provenance --access public --tag "${{ steps.prep.outputs.publish_tag }}"
           fi

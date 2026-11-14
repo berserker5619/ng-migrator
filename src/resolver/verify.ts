@@ -1131,6 +1131,69 @@ export async function resolveFixablePeerConflicts(
     break;
   }
 
+  // Handle introduced missing peers that have a satisfying release in the registry (emit note instead of hard blocker).
+  if (currentCheck.status === 'conflict' && currentCheck.conflicts && currentCheck.conflicts.length > 0) {
+    const remainingConflicts: PeerConflict[] = [];
+    const addedMissingPeers = new Set<string>();
+    for (const conflict of currentCheck.conflicts) {
+      const isDirectDep = project.dependencies.some((d) => d.name === conflict.peer);
+      if (
+        conflict.found ||
+        isDirectDep ||
+        conflict.peer.startsWith('@angular/') ||
+        conflict.peer.startsWith('@angular-devkit/')
+      ) {
+        remainingConflicts.push(conflict);
+        continue;
+      }
+
+      const normRange = normalizeRange(conflict.range);
+      const pack = normRange ? await registry.packument(conflict.peer).catch(() => null) : null;
+      const candidates =
+        pack && normRange
+          ? stableVersionsDesc(pack).filter(
+              (v) => !pack.versions?.[v]?.deprecated && semver.satisfies(v, normRange),
+            )
+          : [];
+
+      if (candidates.length === 0) {
+        remainingConflicts.push(conflict);
+        continue;
+      }
+
+      const chosenVersion = candidates[0]!;
+      if (!addedMissingPeers.has(conflict.peer)) {
+        addedMissingPeers.add(conflict.peer);
+        const reqPkg = stripPackageVersion(conflict.requiredBy);
+        const isDevOnlyPeer =
+          conflict.peer.startsWith('@types/') ||
+          /^(?:karma|jasmine|vitest|jest|eslint|tslint|prettier|@testing-library|@angular-eslint|cypress|playwright)/.test(
+            conflict.peer,
+          ) ||
+          project.dependencies.find((d) => d.name === reqPkg)?.type === 'devDependencies';
+        companionNotes.push({
+          package: conflict.peer,
+          kind: 'add-missing-peer',
+          severity: 'note',
+          evidence: 'declared-compatible',
+          dependencyKind: isDevOnlyPeer ? 'dev-only' : 'runtime',
+          target: chosenVersion,
+          message: `add ${conflict.peer}@${chosenVersion} (required by ${conflict.requiredBy} with "${conflict.range}")`,
+        });
+      }
+    }
+
+    if (remainingConflicts.length !== currentCheck.conflicts.length) {
+      currentCheck = {
+        ...currentCheck,
+        conflicts: remainingConflicts,
+        ...(remainingConflicts.length === 0 && (currentCheck.preExistingConflicts?.length ?? 0) === 0
+          ? { status: 'confirmed' as const }
+          : {}),
+      };
+    }
+  }
+
   return {
     changes: currentChanges,
     resolutionCheck: currentCheck,
@@ -1225,14 +1288,23 @@ export function enrichBlockersWithResolutionCheck(
  */
 export function baselineNotesForResolutionCheck(resolutionCheck: ResolutionCheck): StepNote[] {
   const notes: StepNote[] = [];
+  const preByPkg = new Map<string, PeerConflict[]>();
   for (const c of resolutionCheck.preExistingConflicts ?? []) {
     const pkg = stripPackageVersion(c.requiredBy);
+    const list = preByPkg.get(pkg) ?? [];
+    list.push(c);
+    preByPkg.set(pkg, list);
+  }
+  for (const [pkg, list] of preByPkg) {
+    const relations = list
+      .map((c) => `${c.requiredBy} requires ${c.peer}@"${c.range}"${c.found ? ` [found ${c.found}]` : ''}`)
+      .join('; ');
     notes.push({
       package: pkg,
       kind: 'pre-existing-conflict',
       severity: 'note',
       evidence: 'verified',
-      message: `already present at the current versions; not caused by this step (${c.requiredBy} requires peer ${c.peer}@"${c.range}"${c.found ? `, found ${c.found}` : ''}).`,
+      message: `already present at the current versions; not caused by this step (${relations}).`,
     });
   }
   for (const c of resolutionCheck.resolvedConflicts ?? []) {
