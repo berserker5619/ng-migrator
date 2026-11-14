@@ -41,6 +41,9 @@ export function formatEvidence(evidence: EvidenceKind | string | undefined): str
   if (evidence === 'declared-incompatible') {
     return 'declared incompatible';
   }
+  if (evidence === 'unknown-low-confidence') {
+    return 'unknown, low confidence';
+  }
   if (evidence === 'unknown') {
     return 'unknown, verify by build';
   }
@@ -169,7 +172,11 @@ export function formatStepDocument(
       lines.push('None detected for this step.');
     }
     for (const b of step.blockers) {
-      const typeLabel = b.hard ? '' : ' [soft / unmaintained]';
+      const typeLabel = b.hard
+        ? ''
+        : b.highRisk
+          ? ` [high-risk soft / ${b.reason}]`
+          : ` [soft / ${b.reason === 'deprecated' ? 'deprecated' : b.reason === 'ivy-or-ngcc' ? 'ivy-or-ngcc' : 'unmaintained'}]`;
       lines.push(`### ${b.package} (${b.reason})${typeLabel}`);
       lines.push(`- Dependency kind: ${b.dependencyKind ?? 'runtime'}`);
       if (b.hard && b.reason !== 'peer-conflict' && step.resolution.status === 'confirmed') {
@@ -226,6 +233,12 @@ export function formatStepDocument(
       if (b.lastCompatible) {
         lines.push(`- Last compatible release: ${b.lastCompatible}`);
       }
+      if (b.nextSteps && b.nextSteps.length > 0) {
+        lines.push('- Next steps:');
+        for (const ns of b.nextSteps) {
+          lines.push(`  - ${ns}`);
+        }
+      }
       lines.push('');
     }
     if (step.dependsOnDecisions && step.dependsOnDecisions.length > 0) {
@@ -236,6 +249,14 @@ export function formatStepDocument(
     }
   }
   lines.push('');
+
+  if (step.notes && step.notes.length > 0) {
+    lines.push('## Notes');
+    for (const n of step.notes) {
+      lines.push(`- **${n.package}** (${n.kind}, ${formatEvidence(n.evidence)}): ${n.message}`);
+    }
+    lines.push('');
+  }
 
   if (step.risks.length > 0) {
     lines.push('## Risks');

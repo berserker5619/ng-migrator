@@ -111,6 +111,7 @@ export async function createPlan(options: PlanOptions): Promise<Plan> {
       stepResolution.blockers = stepResolution.blockers.filter((b) => !removedAtStep.has(b.package));
       stepResolution.changes = stepResolution.changes.filter((c) => !removedAtStep.has(c.name));
       stepResolution.heldBack = stepResolution.heldBack.filter((h) => !removedAtStep.has(h.name));
+      stepResolution.notes = stepResolution.notes.filter((n) => !removedAtStep.has(n.package));
     }
 
     for (const b of stepResolution.blockers) {
@@ -156,6 +157,7 @@ export async function createPlan(options: PlanOptions): Promise<Plan> {
       unchanged: stepResolution.unchanged,
       heldBack: stepResolution.heldBack,
       blockers: stepResolution.blockers,
+      ...(stepResolution.notes.length > 0 ? { notes: stepResolution.notes } : {}),
       ...(dependsOnDecisions.length > 0 ? { dependsOnDecisions } : {}),
       resolution: resolutionCheck,
       actions,

@@ -6,10 +6,11 @@ import type { ProjectInfo, StepRequirements } from '../src/model.js';
 import * as proc from '../src/platform/process.js';
 import { createPlan } from '../src/planner/plan.js';
 import { readProject } from '../src/reader/project.js';
-import { RegistryClient, type Packument } from '../src/registry/client.js';
+import { RegistryClient, allVersionsDesc, stableVersionsDesc, type Packument } from '../src/registry/client.js';
 import { loadNpmrc } from '../src/registry/npmrc.js';
+import { computeRecommendation, parseDeprecatedSuccessor } from '../src/recommend/engine.js';
 import { normalizeRange, preserveRangeStyle, safeMinVersion, satisfiesAngularPeer } from '../src/resolver/range.js';
-import { resolveStepDependencies } from '../src/resolver/resolve.js';
+import { isProposedVersionIvyEra, resolveStepDependencies } from '../src/resolver/resolve.js';
 import {
   detectYarnLockfileFlavor,
   parseNpmEresolve,
@@ -1226,7 +1227,7 @@ describe('Three-state evidence and synthetic pattern fixtures', () => {
     expect(hardBlocker?.evidence).toBe('declared-incompatible');
   });
 
-  it('handles pattern D: package declaring no Angular peer in any release (ng2-ckeditor) - soft unknown, never hard', async () => {
+  it('handles pattern D: package declaring no Angular peer in any release (ng2-ckeditor) - non-blocker note when no red flag', async () => {
     const project: ProjectInfo = {
       root: 'l:/fake/editor-app',
       name: 'editor-app',
@@ -1280,13 +1281,11 @@ describe('Three-state evidence and synthetic pattern fixtures', () => {
     expect(ckChange?.target).toBe('1.3.7');
     expect(ckChange?.evidence).toBe('unknown');
 
-    const hardBlocker = result.blockers.find((b) => b.package === 'ng2-ckeditor' && b.hard);
-    expect(hardBlocker).toBeUndefined();
-
-    const softBlocker = result.blockers.find((b) => b.package === 'ng2-ckeditor');
-    expect(softBlocker).toBeDefined();
-    expect(softBlocker?.hard).toBe(false);
-    expect(softBlocker?.evidence).toBe('unknown');
+    expect(result.blockers.find((b) => b.package === 'ng2-ckeditor')).toBeUndefined();
+    const note = result.notes.find((n) => n.package === 'ng2-ckeditor');
+    expect(note).toBeDefined();
+    expect(note?.kind).toBe('verify-by-build');
+    expect(note?.evidence).toBe('unknown');
   });
 
   it('handles pattern E: publish date falling between release dates of Angular n and n+1 (ngx-logger 5.0.12)', async () => {
@@ -1369,6 +1368,9 @@ describe('Robustness: malformed peer range table-driven suite', () => {
     ['bare caret', '^'],
     ['huge 10,000-char string', 'a'.repeat(10_000)],
     ['raw number', 16],
+    ['null value', null],
+    ['object value', { range: '^16.0.0' }],
+    ['array value', ['^16.0.0', '^17.0.0']],
   ];
 
   for (const [desc, val] of malformedRanges) {
@@ -1574,6 +1576,514 @@ describe('Manifest vs Lockfile Disagreement and View Engine Warnings', () => {
     } finally {
       await cleanup();
     }
+  });
+
+  it('handles View Engine outcomes for proposed releases (Ivy upgrade note, hard blocker, high-risk soft blocker, @angular/google-maps exclusion)', async () => {
+    const { dir, cleanup } = await tempProject({
+      'package.json': JSON.stringify({
+        name: 've-outcomes-app',
+        dependencies: {
+          '@angular/core': '^15.2.10',
+          '@angular/google-maps': '^12.2.0',
+          'ngx-ivy-upgrade': '^4.0.0',
+          'ng2-no-ivy': '^0.5.1',
+          'ng2-old-unknown': '^1.2.9',
+        },
+      }),
+      'node_modules/@angular/core/package.json': JSON.stringify({ name: '@angular/core', version: '15.2.10' }),
+      'node_modules/@angular/google-maps/package.json': JSON.stringify({
+        name: '@angular/google-maps',
+        version: '12.2.13',
+        metadata: 'google-maps.metadata.json',
+        peerDependencies: { '@angular/core': '^12.0.0' },
+      }),
+      'node_modules/@angular/google-maps/index.metadata.json': '{}',
+      'node_modules/ngx-ivy-upgrade/package.json': JSON.stringify({
+        name: 'ngx-ivy-upgrade',
+        version: '4.0.0',
+        typings: 'index.d.ts',
+        peerDependencies: { '@angular/core': '^12.0.0' },
+      }),
+      'node_modules/ngx-ivy-upgrade/index.d.ts': 'export declare class IvyUpgradeModule {}',
+      'node_modules/ngx-ivy-upgrade/index.metadata.json': '{}',
+      'node_modules/ng2-no-ivy/package.json': JSON.stringify({
+        name: 'ng2-no-ivy',
+        version: '0.5.1',
+        typings: 'index.d.ts',
+        peerDependencies: { '@angular/core': '>=6.0.0' },
+      }),
+      'node_modules/ng2-no-ivy/index.d.ts': 'export declare class NoIvyModule {}',
+      'node_modules/ng2-no-ivy/index.metadata.json': '{}',
+      'node_modules/ng2-old-unknown/package.json': JSON.stringify({
+        name: 'ng2-old-unknown',
+        version: '1.2.9',
+        metadata: 'index.metadata.json',
+        typings: 'index.d.ts',
+        peerDependencies: { '@angular/core': '^10.0.4' },
+      }),
+      'node_modules/ng2-old-unknown/index.d.ts': 'export declare class OldUnknownModule {}',
+      'node_modules/ng2-old-unknown/index.metadata.json': '{}',
+    });
+
+    try {
+      const project = await readProject(dir);
+      // Official @angular/* (including @angular/google-maps) must never be flagged in viewEngineSuspects
+      expect(project.viewEngineSuspects).not.toContain('@angular/google-maps');
+      expect(project.viewEngineSuspects).toEqual(['ng2-no-ivy', 'ng2-old-unknown', 'ngx-ivy-upgrade']);
+
+      const registry = {
+        async packument(name: string) {
+          if (name === '@angular/core') {
+            return {
+              name: '@angular/core',
+              distTags: { latest: '16.2.12' },
+              versions: { '16.2.12': { version: '16.2.12' } },
+              time: {
+                '16.0.0': '2023-05-03T16:47:02.052Z',
+                '17.0.0': '2023-11-08T12:25:24.973Z',
+              },
+            };
+          }
+          if (name === '@angular/google-maps') {
+            return {
+              name: '@angular/google-maps',
+              distTags: { latest: '16.2.14' },
+              versions: {
+                '16.2.14': {
+                  version: '16.2.14',
+                  module: './fesm2022/google-maps.mjs',
+                  peerDependencies: { '@angular/core': '^16.0.0 || ^17.0.0' },
+                },
+              },
+              time: { '16.2.14': '2026-06-01T00:00:00.000Z' },
+            };
+          }
+          if (name === 'ngx-ivy-upgrade') {
+            return {
+              name: 'ngx-ivy-upgrade',
+              distTags: { latest: '16.1.0' },
+              versions: {
+                '4.0.0': { version: '4.0.0', peerDependencies: { '@angular/core': '^12.0.0' } },
+                '16.1.0': {
+                  version: '16.1.0',
+                  fesm2020: 'fesm2020/ngx-ivy-upgrade.mjs',
+                  exports: { '.': { esm2020: './esm2020/ngx-ivy-upgrade.mjs' } },
+                  peerDependencies: { '@angular/core': '^16.0.0' },
+                },
+              },
+              time: { '16.1.0': '2026-06-01T00:00:00.000Z' },
+            };
+          }
+          if (name === 'ng2-no-ivy') {
+            return {
+              name: 'ng2-no-ivy',
+              distTags: { latest: '0.5.1' },
+              versions: {
+                '0.5.1': {
+                  version: '0.5.1',
+                  main: 'dist/index.js',
+                  typings: 'dist/index.d.ts',
+                  peerDependencies: { '@angular/core': '>=6.0.0' },
+                },
+              },
+              time: { '0.5.1': '2020-02-01T00:00:00.000Z' },
+            };
+          }
+          if (name === 'ng2-old-unknown') {
+            return {
+              name: 'ng2-old-unknown',
+              distTags: { latest: '1.3.7' },
+              versions: {
+                '1.3.7': {
+                  version: '1.3.7',
+                  fesm2020: 'fesm2020/ng2-old-unknown.mjs',
+                  exports: { '.': { fesm2020: './fesm2020/ng2-old-unknown.mjs' } },
+                  peerDependencies: { '@types/ckeditor': '^4.9.10' },
+                },
+              },
+              time: { '1.3.7': '2022-08-13T00:00:00.000Z' },
+            };
+          }
+          return undefined;
+        },
+      } as unknown as RegistryClient;
+
+      const result = await resolveStepDependencies({
+        project,
+        requirements: { major: 16, coreVersion: '16.2.12', notes: [] },
+        registry,
+        clock: () => new Date('2026-11-01T00:00:00.000Z'),
+      });
+
+      // Outcome 1: Ivy-era proposed release exists -> "must upgrade to X" note, no blocker
+      expect(result.blockers.find((b) => b.package === 'ngx-ivy-upgrade')).toBeUndefined();
+      const ivyNote = result.notes.find((n) => n.package === 'ngx-ivy-upgrade' && n.kind === 'ivy-upgrade');
+      expect(ivyNote).toBeDefined();
+      expect(ivyNote?.message).toContain('must upgrade to 16.1.0');
+
+      // Outcome 2: No Ivy-era release -> hard blocker (ivy-or-ngcc)
+      const hardVe = result.blockers.find((b) => b.package === 'ng2-no-ivy');
+      expect(hardVe?.hard).toBe(true);
+      expect(hardVe?.reason).toBe('ivy-or-ngcc');
+
+      // Outcome 3: View Engine + unknown evidence + old publish date -> high-risk soft blocker
+      const highRisk = result.blockers.find((b) => b.package === 'ng2-old-unknown');
+      expect(highRisk).toBeDefined();
+      expect(highRisk?.hard).toBe(false);
+      expect(highRisk?.highRisk).toBe(true);
+      expect(highRisk?.evidence).toBe('unknown');
+
+      // Official @angular/google-maps is resolved via lockstep and never flagged
+      expect(result.blockers.find((b) => b.package === '@angular/google-maps')).toBeUndefined();
+      expect(isProposedVersionIvyEra('@angular/google-maps', '16.2.14', undefined, 16)).toBe(true);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('enforces date cutoff rule (<= Angular n+1) for ngx-logger and ngx-echarts, marks unknown-low-confidence when none qualify, and ignores core packages', async () => {
+    const project: ProjectInfo = {
+      root: 'l:/fake/date-cutoff-app',
+      name: 'date-cutoff-app',
+      packageManager: { name: 'npm', source: 'default' },
+      workspace: 'single',
+      angularProjects: [],
+      angular: { version: '15.2.10', major: 15 },
+      style: 'ngmodule',
+      dependencies: [
+        { name: '@angular/core', declared: '^15.2.10', installed: '15.2.10', type: 'dependencies' },
+        { name: 'rxjs', declared: '^7.5.0', installed: '7.5.7', type: 'dependencies' },
+        { name: 'tslib', declared: '^2.3.0', installed: '2.4.1', type: 'dependencies' },
+        { name: 'zone.js', declared: '~0.13.0', installed: '0.13.3', type: 'dependencies' },
+        { name: 'ngx-echarts', declared: '^15.0.0', installed: '15.0.3', type: 'dependencies' },
+        { name: 'ngx-future-only', declared: '^1.0.0', installed: '1.0.0', type: 'dependencies' },
+      ],
+      overrides: [],
+      viewEngineSuspects: [],
+      ngccScripts: [],
+      hasNodeModules: false,
+      hasNpmWorkspaces: false,
+      warnings: [],
+    };
+
+    const registry = {
+      async packument(name: string) {
+        if (name === '@angular/core') {
+          return {
+            name: '@angular/core',
+            distTags: { latest: '16.2.12' },
+            versions: { '16.2.12': { version: '16.2.12' } },
+            time: {
+              '16.0.0': '2023-05-03T16:47:02.052Z',
+              '17.0.0': '2023-11-08T12:25:24.973Z',
+            },
+          };
+        }
+        if (name === 'rxjs') {
+          return { name: 'rxjs', distTags: { latest: '7.8.2' }, versions: { '7.8.2': { version: '7.8.2' } } };
+        }
+        if (name === 'tslib') {
+          return { name: 'tslib', distTags: { latest: '2.8.1' }, versions: { '2.8.1': { version: '2.8.1' } } };
+        }
+        if (name === 'zone.js') {
+          return { name: 'zone.js', distTags: { latest: '0.13.3' }, versions: { '0.13.3': { version: '0.13.3' } } };
+        }
+        if (name === 'ngx-echarts') {
+          return {
+            name: 'ngx-echarts',
+            distTags: { latest: '22.0.0' },
+            time: {
+              '6.0.1': '2021-01-12T00:00:00.000Z',
+              '16.1.1': '2023-10-12T10:21:55.349Z',
+              '16.2.0': '2023-11-10T02:27:25.158Z',
+              '22.0.0': '2026-07-01T00:00:00.000Z',
+            },
+            versions: {
+              '6.0.1': { version: '6.0.1', peerDependencies: { '@angular/core': '>=10.0.0' } },
+              '16.1.1': { version: '16.1.1', peerDependencies: { echarts: '^5.0.0', rxjs: '^6.0.0 || ^7.0.0' } },
+              '16.2.0': { version: '16.2.0', peerDependencies: { echarts: '^5.0.0', rxjs: '^6.0.0 || ^7.0.0' } },
+              '22.0.0': { version: '22.0.0', peerDependencies: { echarts: '^6.0.0' } },
+            },
+          };
+        }
+        if (name === 'ngx-future-only') {
+          return {
+            name: 'ngx-future-only',
+            distTags: { latest: '2.0.0' },
+            time: {
+              '2.0.0': '2026-08-01T00:00:00.000Z',
+            },
+            versions: {
+              '2.0.0': { version: '2.0.0', peerDependencies: {} },
+            },
+          };
+        }
+        return undefined;
+      },
+    } as unknown as RegistryClient;
+
+    const result = await resolveStepDependencies({
+      project,
+      requirements: { major: 16, coreVersion: '16.2.12', zone: '~0.13.0', rxjs: '^6.5.3 || ^7.4.0', notes: [] },
+      registry,
+      clock: () => new Date('2026-11-01T00:00:00.000Z'),
+    });
+
+    // Core/utility packages never produce blockers or unknown notes
+    for (const corePkg of ['rxjs', 'tslib', 'zone.js']) {
+      expect(result.blockers.find((b) => b.package === corePkg)).toBeUndefined();
+      expect(result.notes.find((n) => n.package === corePkg)).toBeUndefined();
+    }
+
+    // ngx-echarts picks 16.1.1 (<= Angular 17 release date 2023-11-08) over 16.2.0 (2023-11-10)
+    // and is NOT marked unmaintained because newest 22.0.0 is from 2026
+    const echartsChange = result.changes.find((c) => c.name === 'ngx-echarts');
+    expect(echartsChange?.target).toBe('16.1.1');
+    expect(echartsChange?.evidence).toBe('unknown');
+    expect(result.blockers.find((b) => b.package === 'ngx-echarts')).toBeUndefined();
+    expect(result.notes.find((n) => n.package === 'ngx-echarts' && n.kind === 'verify-by-build')).toBeDefined();
+
+    // ngx-future-only had no releases published <= Angular 17 release date -> unknown-low-confidence note
+    const futureChange = result.changes.find((c) => c.name === 'ngx-future-only');
+    expect(futureChange?.evidence).toBe('unknown-low-confidence');
+    const futureNote = result.notes.find((n) => n.package === 'ngx-future-only');
+    expect(futureNote?.evidence).toBe('unknown-low-confidence');
+    expect(result.blockers.find((b) => b.package === 'ngx-future-only')).toBeUndefined();
+  });
+
+  it('parses deprecated message for named successor (@ngneat/transloco -> @jsverse/transloco) and provides nextSteps when no alternate is known', async () => {
+    expect(
+      parseDeprecatedSuccessor(
+        'Package has been renamed and moved to @jsverse/transloco. Please use @jsverse/transloco instead.',
+        '@ngneat/transloco',
+      ),
+    ).toBe('@jsverse/transloco');
+
+    const mockReg = {
+      async packument(name: string) {
+        if (name === '@ngneat/transloco') {
+          return {
+            name: '@ngneat/transloco',
+            distTags: { latest: '6.0.4' },
+            versions: {
+              '6.0.4': {
+                version: '6.0.4',
+                deprecated: 'This package has moved to @jsverse/transloco',
+              },
+            },
+          };
+        }
+        if (name === 'obscure-legacy-pkg') {
+          return {
+            name: 'obscure-legacy-pkg',
+            distTags: { latest: '1.0.0' },
+            repository: { url: 'git+https://github.com/example/obscure-legacy-pkg.git' },
+            versions: { '1.0.0': { version: '1.0.0' } },
+          };
+        }
+        return undefined;
+      },
+    } as unknown as RegistryClient;
+
+    const translocoRec = await computeRecommendation({
+      projectRoot: 'l:/fake/nonexistent',
+      blocker: {
+        package: '@ngneat/transloco',
+        reason: 'deprecated',
+        hard: false,
+        details: 'This package has moved to @jsverse/transloco',
+      },
+      targetMajor: 17,
+      targetCoreVersion: '17.3.0',
+      registry: mockReg,
+      rules: [],
+    });
+    expect(translocoRec.recommendation).toBe('alternate');
+    expect(translocoRec.confidence).toBe('medium');
+    expect(translocoRec.recommendedFix).toContain('@jsverse/transloco');
+
+    const manualRec = await computeRecommendation({
+      projectRoot: 'l:/fake/nonexistent',
+      blocker: {
+        package: 'obscure-legacy-pkg',
+        reason: 'no-compatible-version',
+        hard: true,
+        details: 'No release supports Angular 17.',
+      },
+      targetMajor: 17,
+      targetCoreVersion: '17.3.0',
+      registry: mockReg,
+      rules: [],
+    });
+    expect(manualRec.recommendation).toBe('manual');
+    expect(manualRec.nextSteps?.some((s) => s.includes('npm view obscure-legacy-pkg'))).toBe(true);
+    expect(manualRec.nextSteps?.some((s) => s.includes('https://github.com/example/obscure-legacy-pkg'))).toBe(true);
+    expect(manualRec.nextSteps?.some((s) => s.includes('README'))).toBe(true);
+  });
+
+  it('survives malformed packuments (missing time, malformed version keys, null version doc, missing versions object)', async () => {
+    const project: ProjectInfo = {
+      root: 'l:/fake/malformed-pack-app',
+      name: 'malformed-pack-app',
+      packageManager: { name: 'npm', source: 'default' },
+      workspace: 'single',
+      angularProjects: [],
+      angular: { version: '15.2.10', major: 15 },
+      style: 'ngmodule',
+      dependencies: [
+        { name: '@angular/core', declared: '^15.2.10', installed: '15.2.10', type: 'dependencies' },
+        { name: 'ngx-broken-meta', declared: '^1.0.0', installed: '1.0.0', type: 'dependencies' },
+        { name: 'ngx-no-versions', declared: '^1.0.0', installed: '1.0.0', type: 'dependencies' },
+      ],
+      overrides: [],
+      viewEngineSuspects: [],
+      ngccScripts: [],
+      hasNodeModules: false,
+      hasNpmWorkspaces: false,
+      warnings: [],
+    };
+
+    const brokenPack = {
+      name: 'ngx-broken-meta',
+      distTags: { latest: '1.0.0' },
+      time: undefined,
+      versions: {
+        'not-a-semver': { version: 'not-a-semver' },
+        '1.2.bad': null,
+        '1.0.0': null,
+        '2.0.0': { version: '2.0.0', peerDependencies: { '@angular/core': '^16.0.0' } },
+      },
+    } as unknown as Packument;
+
+    const noVersionsPack = {
+      name: 'ngx-no-versions',
+      distTags: {},
+      versions: undefined,
+    } as unknown as Packument;
+
+    expect(() => allVersionsDesc(brokenPack)).not.toThrow();
+    expect(() => stableVersionsDesc(brokenPack)).not.toThrow();
+    expect(() => allVersionsDesc(noVersionsPack)).not.toThrow();
+
+    const registry = {
+      async packument(name: string) {
+        if (name === '@angular/core') {
+          return {
+            name: '@angular/core',
+            distTags: { latest: '16.2.12' },
+            versions: { '16.2.12': { version: '16.2.12' } },
+          };
+        }
+        if (name === 'ngx-broken-meta') return brokenPack;
+        if (name === 'ngx-no-versions') return noVersionsPack;
+        return undefined;
+      },
+    } as unknown as RegistryClient;
+
+    const res = await resolveStepDependencies({
+      project,
+      requirements: { major: 16, coreVersion: '16.2.12', notes: [] },
+      registry,
+    });
+    expect(res.changes.find((c) => c.name === 'ngx-broken-meta')?.target).toBe('2.0.0');
+    expect(res.unchanged).toContain('ngx-no-versions');
+  });
+
+  it('evaluates Signal (a) sibling alignment before the publish-date cutoff so post-release aligned siblings stay in lockstep', async () => {
+    const project: ProjectInfo = {
+      root: 'l:/fake/nebular-app',
+      name: 'nebular-app',
+      packageManager: { name: 'npm', source: 'default' },
+      workspace: 'single',
+      angularProjects: [],
+      angular: { version: '15.2.10', major: 15 },
+      style: 'ngmodule',
+      dependencies: [
+        { name: '@angular/core', declared: '^15.2.10', installed: '15.2.10', type: 'dependencies' },
+        { name: '@nebular/theme', declared: '^11.0.0', installed: '11.0.1', type: 'dependencies' },
+        { name: '@nebular/eva-icons', declared: '^11.0.0', installed: '11.0.1', type: 'dependencies' },
+      ],
+      overrides: [],
+      viewEngineSuspects: [],
+      ngccScripts: [],
+      hasNodeModules: false,
+      hasNpmWorkspaces: false,
+      warnings: [],
+    };
+
+    const registry = {
+      async packument(name: string) {
+        if (name === '@angular/core') {
+          return {
+            name: '@angular/core',
+            distTags: { latest: '17.3.0' },
+            time: {
+              '16.0.0': '2023-05-03T18:54:51.000Z',
+              '16.2.12': '2023-11-08T10:00:00.000Z',
+              '17.0.0': '2023-11-08T12:25:24.973Z',
+            },
+            versions: {
+              '16.2.12': { version: '16.2.12' },
+              '17.0.0': { version: '17.0.0' },
+            },
+          };
+        }
+        if (name === '@nebular/theme') {
+          return {
+            name: '@nebular/theme',
+            distTags: { latest: '12.0.0' },
+            time: {
+              '11.0.1': '2023-06-01T00:00:00.000Z',
+              '12.0.0': '2023-11-09T13:29:25.633Z',
+            },
+            versions: {
+              '11.0.1': {
+                version: '11.0.1',
+                peerDependencies: { '@angular/core': '^15.0.0' },
+              },
+              '12.0.0': {
+                version: '12.0.0',
+                peerDependencies: { '@angular/core': '^16.0.0' },
+              },
+            },
+          };
+        }
+        if (name === '@nebular/eva-icons') {
+          return {
+            name: '@nebular/eva-icons',
+            distTags: { latest: '12.0.0' },
+            time: {
+              '11.0.1': '2023-06-01T00:00:00.000Z',
+              // Published 1 day AFTER Angular 17 (2023-11-08T12:25:24.973Z)
+              '12.0.0': '2023-11-09T13:29:13.080Z',
+            },
+            versions: {
+              '11.0.1': {
+                version: '11.0.1',
+                peerDependencies: { '@nebular/theme': '^11.0.0' },
+              },
+              '12.0.0': {
+                version: '12.0.0',
+                peerDependencies: { '@nebular/theme': '^12.0.0' },
+              },
+            },
+          };
+        }
+        return undefined;
+      },
+    } as unknown as RegistryClient;
+
+    const res = await resolveStepDependencies({
+      project,
+      requirements: { major: 16, coreVersion: '16.2.12', notes: [] },
+      registry,
+      clock: () => new Date('2024-06-01T00:00:00.000Z'),
+    });
+
+    expect(res.changes.find((c) => c.name === '@nebular/theme')?.target).toBe('12.0.0');
+    expect(res.changes.find((c) => c.name === '@nebular/eva-icons')?.target).toBe('12.0.0');
+    expect(res.blockers.some((b) => b.package === '@nebular/eva-icons')).toBe(false);
+    expect(res.notes.find((n) => n.package === '@nebular/eva-icons')?.evidence).toBe('unknown');
   });
 });
 

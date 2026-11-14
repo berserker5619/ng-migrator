@@ -117,7 +117,7 @@ export function createProgram(
       // 2. Git status
       const git = await checkGitStatus(projectRoot);
       if (!git.isGitRepo) {
-        out.info('Git repository: not detected (working directory is clean).');
+        out.info('Git repository: not detected.');
       } else if (git.clean) {
         out.success(`Git working tree is clean (HEAD: ${git.headCommit?.slice(0, 7) ?? 'unknown'})`);
       } else {
@@ -260,7 +260,11 @@ export function createProgram(
       out.info(`Dependencies analyzed: ${project.dependencies.length}`);
       out.info(`Proposed package updates: ${resolution.changes.length}`);
       out.info(`Held back releases: ${resolution.heldBack.length}`);
-      out.info(`Blockers detected: ${resolution.blockers.length}\n`);
+      out.info(`Blockers detected: ${resolution.blockers.length}`);
+      if (resolution.notes.length > 0) {
+        out.info(`Notes (non-blocking): ${resolution.notes.length}`);
+      }
+      out.info('');
 
       if (resolution.blockers.length > 0) {
         out.warn('Blockers for next major:');
@@ -272,6 +276,14 @@ export function createProgram(
         out.success('No dependency blockers found for immediate next major.');
       }
 
+      if (resolution.notes.length > 0) {
+        out.info('Notes:');
+        for (const n of resolution.notes) {
+          out.info(`  [${n.kind}] ${n.package}: ${n.message}`);
+        }
+        out.info('');
+      }
+
       if (opts.report) {
         const reportPath = path.resolve(projectRoot, opts.report);
         const relReportPath = path.relative(projectRoot, reportPath).replace(/\\/g, '/') || opts.report;
@@ -280,6 +292,7 @@ export function createProgram(
           currentAngular: project.angular.version,
           targetMajor,
           blockers: resolution.blockers,
+          notes: resolution.notes,
           changes: resolution.changes,
           heldBack: resolution.heldBack,
         };
@@ -366,8 +379,11 @@ export function createProgram(
         out.success(`\nPlan generated successfully (${plan.steps.length} step(s)):`);
         for (const s of plan.steps) {
           const prov = s.provisional ? ' [provisional]' : '';
-          const blockers = s.blockers.length > 0 ? ` (${s.blockers.length} blocker(s))` : '';
-          out.info(`  Step ${s.index}: Angular ${s.from} -> ${s.to}${prov}${blockers}`);
+          const parts: string[] = [];
+          if (s.blockers.length > 0) parts.push(`${s.blockers.length} blocker(s)`);
+          if (s.notes && s.notes.length > 0) parts.push(`${s.notes.length} note(s)`);
+          const summarySuffix = parts.length > 0 ? ` (${parts.join(', ')})` : '';
+          out.info(`  Step ${s.index}: Angular ${s.from} -> ${s.to}${prov}${summarySuffix}`);
         }
 
         out.info(`\nSummary runbook written to: .ng-migrator/summary.md`);

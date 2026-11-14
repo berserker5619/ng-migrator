@@ -56,13 +56,13 @@ When node-semver's `minVersion`, `intersects`, or `subset` encountered `"7.x | 8
 
 #### 1. Doctor
 ```powershell
-node L:\ng-migrate\dist\cli.js doctor --project L:\test-clones\ngx-admin
+node dist/cli.js doctor --project ./test-clones/ngx-admin
 ```
 ```text
 Running pre-upgrade environment and project checks...
 
 ✔ Node runtime: 24.19.0 (satisfies >=22)
-Git repository: not detected (working directory is clean).
+Git repository: not detected.
 ✔ Project: ngx-admin (Angular 15.2.10)
 ✔ Package manager: npm (lockfile)
 ✔ Workspace structure: angular-multi, style: ngmodule
@@ -76,7 +76,7 @@ Doctor check completed.
 
 #### 2. Analyze
 ```powershell
-node L:\ng-migrate\dist\cli.js analyze --project L:\test-clones\ngx-admin --as-of 2026-11-11
+node dist/cli.js analyze --project ./test-clones/ngx-admin --as-of 2026-11-11
 ```
 ```text
 Analyzing project: ngx-admin
@@ -97,7 +97,7 @@ Blockers detected: 5
 
 #### 3. Plan
 ```powershell
-node L:\ng-migrate\dist\cli.js plan --project L:\test-clones\ngx-admin --to 16 --as-of 2026-11-11
+node dist/cli.js plan --project ./test-clones/ngx-admin --to 16 --as-of 2026-11-11
 ```
 ```text
 Planning upgrade: Angular 15.2.10 -> 16...
@@ -125,13 +125,13 @@ Run "ng-migrator approve 1" after reviewing.
 
 #### 1. Doctor
 ```powershell
-node L:\ng-migrate\dist\cli.js doctor --project L:\test-clones\my-thai-star\angular
+node dist/cli.js doctor --project ./test-clones/my-thai-star/angular
 ```
 ```text
 Running pre-upgrade environment and project checks...
 
 ✔ Node runtime: 24.19.0 (satisfies >=22)
-Git repository: not detected (working directory is clean).
+Git repository: not detected.
 ✔ Project: mythaistar-restaurant (Angular 13.1.2)
 ✔ Package manager: npm (lockfile)
 ✔ Workspace structure: single, style: ngmodule
@@ -145,7 +145,7 @@ Doctor check completed.
 
 #### 2. Analyze
 ```powershell
-node L:\ng-migrate\dist\cli.js analyze --project L:\test-clones\my-thai-star\angular --as-of 2026-11-11
+node dist/cli.js analyze --project ./test-clones/my-thai-star/angular --as-of 2026-11-11
 ```
 ```text
 Analyzing project: mythaistar-restaurant
@@ -167,7 +167,7 @@ Blockers detected: 6
 
 #### 3. Plan
 ```powershell
-node L:\ng-migrate\dist\cli.js plan --project L:\test-clones\my-thai-star\angular --to 14 --as-of 2026-11-11
+node dist/cli.js plan --project ./test-clones/my-thai-star/angular --to 14 --as-of 2026-11-11
 ```
 ```text
 Planning upgrade: Angular 13.1.2 -> 14...
@@ -201,7 +201,7 @@ Run "ng-migrator approve 1" after reviewing.
 
 #### 2. Plan
 ```powershell
-node L:\ng-migrate\dist\cli.js plan --project L:\test-clones\material-dashboard-angular --to 14 --as-of 2026-11-11
+node dist/cli.js plan --project ./test-clones/material-dashboard-angular --to 14 --as-of 2026-11-11
 ```
 ```text
 Planning upgrade: Angular 13.3.1 -> 14...
@@ -239,7 +239,7 @@ To rigorously validate behavior across diverse package manager ecosystems (npm, 
 
 Commands were tested on the planned step of `ngx-admin`:
 ```powershell
-node L:\ng-migrate\dist\cli.js status --project L:\test-clones\ngx-admin
+node dist/cli.js status --project ./test-clones/ngx-admin
 ```
 ```text
 Migration status: Angular 15.2.10 -> 16
@@ -250,7 +250,7 @@ Steps (1 total):
 
 Approving the step:
 ```powershell
-node L:\ng-migrate\dist\cli.js approve 1 --project L:\test-clones\ngx-admin
+node dist/cli.js approve 1 --project ./test-clones/ngx-admin
 ```
 ```text
 ⚠ Step 1 has 6 open decision(s) in 01-angular-15-to-16.md.
@@ -295,14 +295,15 @@ Following `doctor`, `analyze`, `plan`, and `approve`, `git status --short` was e
 
 ---
 
-## 7. Performance & Scale Observations
+## 7. Measured CLI Timings (`Measure-Command`)
 
-| Phase | Small Project (~20 pkgs) | Large Project (~80 pkgs) | Notes |
-|---|---|---|---|
-| **`doctor`** | `< 200 ms` | `< 400 ms` | Fast JSON parse & lockfile scan |
-| **`analyze`** (uncached) | `~ 2 s` | `~ 15-20 s` | Fetches registry packuments for all packages |
-| **`analyze`** (cached) | `< 500 ms` | `< 1.5 s` | Pure in-memory / disk cache evaluation |
-| **`plan`** (peer verification) | `~ 8 s` | `~ 35-45 s` | Dominated by isolated `npm install --dry-run` resolution in temp dir |
+Measured on Windows with PowerShell `Measure-Command { node dist/cli.js ... | Out-Null }` against warm offline registry caches (`--offline`):
+
+| Project | `doctor` | `analyze --offline` | `plan --offline` | Notes |
+|---|---|---|---|---|
+| **`angular-14-login`** | `650.094 ms` | `902.1653 ms` | `1735.277 ms` (`--to 17`, 3 steps) | Scratch copy with `node_modules` |
+| **`k8s-istio-observe-frontend`** | `504.8178 ms` | `1100.368 ms` | `1299.7315 ms` (`--to 13`, 1 step) | Lockfile mode (`node_modules` absent) |
+| **`ngx-admin`** | `745.5075 ms` | `3648.5022 ms` | `3648.934 ms` (`--to 16`, 1 step) | Scratch copy with `node_modules` (83 packages) |
 
 ---
 

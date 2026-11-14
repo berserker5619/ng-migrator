@@ -1,9 +1,129 @@
 import type { Blocker } from '../model.js';
-import type { RegistryClient } from '../registry/client.js';
+import type { Packument, RegistryClient } from '../registry/client.js';
 import { findAlternateCandidates } from './alternates.js';
 import { evaluateComplexity } from './complexity.js';
 import { findRule, type MigrationRule } from './rules.js';
 import { analyzePackageUsage, type UsageFootprint } from './usage.js';
+
+const DEPRECATION_STOPWORDS = new Set([
+  'a',
+  'an',
+  'the',
+  'this',
+  'that',
+  'it',
+  'another',
+  'instead',
+  'deprecated',
+  'package',
+  'packages',
+  'version',
+  'versions',
+  'readme',
+  'changelog',
+  'github',
+  'npm',
+  'yarn',
+  'pnpm',
+  'angular',
+  'please',
+  'see',
+  'here',
+  'more',
+  'info',
+  'information',
+  'details',
+  'official',
+  'new',
+  'maintained',
+  'unsupported',
+]);
+
+function cleanCandidatePkgName(raw: string, currentPackage: string): string | undefined {
+  let s = raw.trim().replace(/^[`"'(<\u005B]+|[`"')>\].,;:!?]+$/g, '');
+  if (!s) return undefined;
+  // Strip trailing @version specifier (keeping leading @scope/name)
+  const atAfterSlash = s.startsWith('@') ? s.indexOf('@', s.indexOf('/') + 1) : s.indexOf('@');
+  if (atAfterSlash > 0) {
+    s = s.slice(0, atAfterSlash);
+  }
+  s = s.trim();
+  if (!s || s === currentPackage) return undefined;
+  if (s.includes('://') || s.includes('.git') || s.includes('.html')) return undefined;
+  if (DEPRECATION_STOPWORDS.has(s.toLowerCase())) return undefined;
+  if (/^v?\d+(\.\d+)*$/i.test(s)) return undefined;
+  // Valid npm package name pattern (scoped or unscoped, lowercase)
+  if (!/^(?:@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/.test(s)) {
+    return undefined;
+  }
+  return s;
+}
+
+/**
+ * Extracts a named successor package from an npm deprecation message, if present
+ * (e.g., "@ngneat/transloco" -> "@jsverse/transloco").
+ */
+export function parseDeprecatedSuccessor(
+  deprecatedMessage: string | undefined,
+  currentPackage: string,
+): string | undefined {
+  if (!deprecatedMessage || typeof deprecatedMessage !== 'string') return undefined;
+
+  const npmUrlMatch = deprecatedMessage.match(
+    /npmjs\.com\/package\/((?:@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*)/i,
+  );
+  if (npmUrlMatch?.[1]) {
+    const cleaned = cleanCandidatePkgName(npmUrlMatch[1], currentPackage);
+    if (cleaned) return cleaned;
+  }
+
+  const phraseRegex =
+    /(?:moved\s+to|renamed\s+to|replaced\s+(?:by|with)|superseded\s+by|deprecated\s+in\s+favou?r\s+of|in\s+favou?r\s+of|migrate\s+to|switch\s+to|please\s+use|instead\s+use|install|use)\s+[`"']?((?:@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*(?:@[^\s`"')\].,;]+)?)["'`]?/gi;
+
+  for (const match of deprecatedMessage.matchAll(phraseRegex)) {
+    const candidate = match[1];
+    if (!candidate) continue;
+    // Do not treat bare words as successors unless backticked/scoped or clearly named package;
+    // reject plain English verbs/nouns that slipped past stopwords if unscoped single word <= 2 chars
+    const cleaned = cleanCandidatePkgName(candidate, currentPackage);
+    if (cleaned && (cleaned.startsWith('@') || cleaned.includes('-') || candidate.startsWith('`'))) {
+      return cleaned;
+    }
+  }
+
+  // Fallback: any scoped npm package mentioned in the message that differs from currentPackage
+  const scopedMatches = deprecatedMessage.match(/@[a-z0-9-~][a-z0-9-._~]*\/[a-z0-9-~][a-z0-9-._~]*/gi);
+  if (scopedMatches) {
+    for (const raw of scopedMatches) {
+      const cleaned = cleanCandidatePkgName(raw, currentPackage);
+      if (cleaned) return cleaned;
+    }
+  }
+
+  return undefined;
+}
+
+export function extractRepositoryUrl(pack: Packument | undefined): string | undefined {
+  if (!pack) return undefined;
+  const rawRepo = typeof pack.repository === 'string' ? pack.repository : pack.repository?.url;
+  if (rawRepo && typeof rawRepo === 'string') {
+    let url = rawRepo.trim().replace(/^git\+/, '').replace(/\.git$/i, '');
+    if (url.startsWith('git://')) {
+      url = `https://${url.slice('git://'.length)}`;
+    } else if (url.startsWith('git@github.com:')) {
+      url = `https://github.com/${url.slice('git@github.com:'.length)}`;
+    } else if (url.startsWith('github:')) {
+      url = `https://github.com/${url.slice('github:'.length)}`;
+    }
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      return url;
+    }
+  }
+  if (pack.homepage && typeof pack.homepage === 'string' && pack.homepage.startsWith('http')) {
+    return pack.homepage;
+  }
+  return undefined;
+}
 
 export interface RecommendOptions {
   projectRoot: string;
@@ -24,6 +144,7 @@ export interface RecommendationResult {
   runnerUp?: string;
   reasoning: string;
   recommendedFix: string;
+  nextSteps?: string[];
   usage?: {
     filesCount: number;
     templateUsages: number;
@@ -181,11 +302,12 @@ export async function computeRecommendation(
     }
   }
 
-  // 2. Fetch Complexity Signals
+  // 2. Fetch Complexity & Deprecation/Repository Signals
+  let pack: Packument | undefined;
   let latestMeta;
   let description: string | undefined;
   try {
-    const pack = await registry.packument(blocker.package);
+    pack = await registry.packument(blocker.package);
     if (pack) {
       description = (pack as unknown as { description?: string }).description;
       const latest = pack.distTags.latest;
@@ -193,6 +315,26 @@ export async function computeRecommendation(
     }
   } catch {
     // ignore
+  }
+
+  // Parse npm deprecated message for named successor package (medium-confidence alternate)
+  const chosenMeta = blocker.chosenVersion ? pack?.versions?.[blocker.chosenVersion] : undefined;
+  const deprecatedMsg =
+    chosenMeta?.deprecated ??
+    latestMeta?.deprecated ??
+    (blocker.reason === 'deprecated' ? blocker.details : undefined);
+  const deprecatedSuccessor = parseDeprecatedSuccessor(deprecatedMsg, blocker.package);
+  if (deprecatedSuccessor && !denyList.includes(deprecatedSuccessor)) {
+    return {
+      recommendation: 'alternate',
+      source: 'analysis',
+      confidence: 'medium',
+      effort: '1 to 4 hours',
+      runnerUp: 'manual refactoring',
+      recommendedFix: `Replace with ${deprecatedSuccessor}`,
+      reasoning: `Deprecation notice on ${blocker.package} names successor package "${deprecatedSuccessor}". Migrate imports and APIs to ${deprecatedSuccessor}.`,
+      usage: usageData,
+    };
   }
 
   const complexity = evaluateComplexity(blocker.package, latestMeta, description);
@@ -257,16 +399,28 @@ export async function computeRecommendation(
     };
   }
 
-  // If this is a soft blocker (a published version declares compatibility with targetMajor, but is deprecated/unmaintained)
+  const repoUrl = extractRepositoryUrl(pack);
+  const nextSteps = [
+    `Run \`npm view ${blocker.package} deprecated repository homepage\` to inspect upstream status and deprecation notes`,
+    repoUrl
+      ? `Inspect repository and open issues: ${repoUrl}`
+      : `Run \`npm repo ${blocker.package}\` to check the upstream repository`,
+    `Read the ${blocker.package} README and changelog for Angular ${targetMajor} migration guidance`,
+  ];
+
+  // If this is a soft blocker (e.g. deprecated/unmaintained or View Engine + unknown + old publish date)
   if (!blocker.hard) {
     return {
       recommendation: 'upgrade',
       source: 'analysis',
-      confidence: 'medium',
-      effort: '15 to 30 minutes (verify in build and tests)',
+      confidence: blocker.highRisk ? 'low' : 'medium',
+      effort: blocker.highRisk ? 'half day (verify build or replace)' : '15 to 30 minutes (verify in build and tests)',
       runnerUp: 'replace with maintained alternative or in-project utility',
-      recommendedFix: 'Upgrade to declared-compatible release and monitor maintenance risk',
-      reasoning: `A release of ${blocker.package} declares peer compatibility with Angular ${targetMajor}, though the package is flagged as ${blocker.reason}. Verify behavior during build and tests.`,
+      recommendedFix: blocker.highRisk
+        ? 'High-risk soft blocker: verify proposed release carefully in build or replace'
+        : 'Upgrade to declared-compatible release and monitor maintenance risk',
+      reasoning: `No known alternate package is cataloged for ${blocker.package}. ${blocker.highRisk ? 'This is a high-risk soft blocker (View Engine library with unknown peer range and old publish date).' : `A release of ${blocker.package} is flagged as ${blocker.reason}.`} Verify behavior during build and tests.`,
+      nextSteps,
       usage: usageData,
     };
   }
@@ -278,8 +432,9 @@ export async function computeRecommendation(
     confidence: 'low',
     effort: 'several days',
     runnerUp: 'fork or inline replacement',
-    recommendedFix: 'Manual refactoring',
-    reasoning: `No compatible version or known alternate found for ${blocker.package}. Manual audit and replacement required.`,
+    recommendedFix: 'Manual refactoring (no known alternate)',
+    reasoning: `No compatible version or known alternate found for ${blocker.package}. Manual audit and replacement required; see next steps below.`,
+    nextSteps,
     usage: usageData,
   };
 }

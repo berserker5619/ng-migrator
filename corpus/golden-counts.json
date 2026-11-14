@@ -1,0 +1,320 @@
+{
+  "_note": "Golden blocker and note counts per step (offline mode, clock=2026-11-14T00:00:00.000Z). Note: on ngx-admin, online npm dry-run adds 1 extra blocker (ngx-echarts peer-conflict against echarts@4.9.0 -> 7 online, 6 offline). Update only with Golden-Update: in commit message.",
+  "clock": "2026-11-14T00:00:00.000Z",
+  "mode": "offline",
+  "projects": {
+    "angular-13-login": {
+      "targetMajor": 16,
+      "steps": [
+        {
+          "step": 1,
+          "from": 13,
+          "to": 14,
+          "blockerCount": 0,
+          "noteCount": 0,
+          "blockers": [],
+          "notes": []
+        },
+        {
+          "step": 2,
+          "from": 14,
+          "to": 15,
+          "blockerCount": 0,
+          "noteCount": 0,
+          "blockers": [],
+          "notes": []
+        },
+        {
+          "step": 3,
+          "from": 15,
+          "to": 16,
+          "blockerCount": 0,
+          "noteCount": 0,
+          "blockers": [],
+          "notes": []
+        }
+      ]
+    },
+    "angular-14-login": {
+      "targetMajor": 17,
+      "steps": [
+        {
+          "step": 1,
+          "from": 14,
+          "to": 15,
+          "blockerCount": 0,
+          "noteCount": 0,
+          "blockers": [],
+          "notes": []
+        },
+        {
+          "step": 2,
+          "from": 15,
+          "to": 16,
+          "blockerCount": 0,
+          "noteCount": 0,
+          "blockers": [],
+          "notes": []
+        },
+        {
+          "step": 3,
+          "from": 16,
+          "to": 17,
+          "blockerCount": 0,
+          "noteCount": 0,
+          "blockers": [],
+          "notes": []
+        }
+      ]
+    },
+    "angular-15-signup-boilerplate": {
+      "targetMajor": 17,
+      "steps": [
+        {
+          "step": 1,
+          "from": 15,
+          "to": 16,
+          "blockerCount": 0,
+          "noteCount": 0,
+          "blockers": [],
+          "notes": []
+        },
+        {
+          "step": 2,
+          "from": 16,
+          "to": 17,
+          "blockerCount": 0,
+          "noteCount": 0,
+          "blockers": [],
+          "notes": []
+        }
+      ]
+    },
+    "k8s-istio-observe-frontend": {
+      "targetMajor": 16,
+      "steps": [
+        {
+          "step": 1,
+          "from": 12,
+          "to": 13,
+          "blockerCount": 2,
+          "noteCount": 0,
+          "blockers": [
+            {
+              "package": "codelyzer",
+              "reason": "no-compatible-version",
+              "hard": true,
+              "highRisk": false,
+              "evidence": "declared-incompatible"
+            },
+            {
+              "package": "ngx-logger",
+              "reason": "unmaintained",
+              "hard": false,
+              "highRisk": false,
+              "evidence": "unknown"
+            }
+          ],
+          "notes": []
+        },
+        {
+          "step": 2,
+          "from": 13,
+          "to": 14,
+          "blockerCount": 2,
+          "noteCount": 0,
+          "blockers": [
+            {
+              "package": "codelyzer",
+              "reason": "no-compatible-version",
+              "hard": true,
+              "highRisk": false,
+              "evidence": "declared-incompatible"
+            },
+            {
+              "package": "ngx-logger",
+              "reason": "unmaintained",
+              "hard": false,
+              "highRisk": false,
+              "evidence": "unknown"
+            }
+          ],
+          "notes": []
+        },
+        {
+          "step": 3,
+          "from": 14,
+          "to": 15,
+          "blockerCount": 2,
+          "noteCount": 0,
+          "blockers": [
+            {
+              "package": "codelyzer",
+              "reason": "no-compatible-version",
+              "hard": true,
+              "highRisk": false,
+              "evidence": "declared-incompatible"
+            },
+            {
+              "package": "ngx-logger",
+              "reason": "unmaintained",
+              "hard": false,
+              "highRisk": false,
+              "evidence": "unknown"
+            }
+          ],
+          "notes": []
+        },
+        {
+          "step": 4,
+          "from": 15,
+          "to": 16,
+          "blockerCount": 2,
+          "noteCount": 0,
+          "blockers": [
+            {
+              "package": "codelyzer",
+              "reason": "no-compatible-version",
+              "hard": true,
+              "highRisk": false,
+              "evidence": "declared-incompatible"
+            },
+            {
+              "package": "ngx-logger",
+              "reason": "unmaintained",
+              "hard": false,
+              "highRisk": false,
+              "evidence": "unknown"
+            }
+          ],
+          "notes": []
+        }
+      ]
+    },
+    "ng-material-starter-kit": {
+      "targetMajor": 16,
+      "steps": [
+        {
+          "step": 1,
+          "from": 14,
+          "to": 15,
+          "blockerCount": 1,
+          "noteCount": 0,
+          "blockers": [
+            {
+              "package": "@angular/flex-layout",
+              "reason": "deprecated",
+              "hard": false,
+              "highRisk": false,
+              "evidence": "declared"
+            }
+          ],
+          "notes": []
+        },
+        {
+          "step": 2,
+          "from": 15,
+          "to": 16,
+          "blockerCount": 0,
+          "noteCount": 0,
+          "blockers": [],
+          "notes": []
+        }
+      ]
+    },
+    "ngx-admin": {
+      "targetMajor": 16,
+      "steps": [
+        {
+          "step": 1,
+          "from": 15,
+          "to": 16,
+          "blockerCount": 6,
+          "noteCount": 6,
+          "blockers": [
+            {
+              "package": "@asymmetrik/ngx-leaflet",
+              "reason": "unmaintained",
+              "hard": false,
+              "highRisk": false,
+              "evidence": "declared"
+            },
+            {
+              "package": "angular2-chartjs",
+              "reason": "ivy-or-ngcc",
+              "hard": true,
+              "highRisk": false,
+              "evidence": "declared"
+            },
+            {
+              "package": "codelyzer",
+              "reason": "no-compatible-version",
+              "hard": true,
+              "highRisk": false,
+              "evidence": "declared-incompatible"
+            },
+            {
+              "package": "ng2-ckeditor",
+              "reason": "ivy-or-ngcc",
+              "hard": false,
+              "highRisk": true,
+              "evidence": "unknown"
+            },
+            {
+              "package": "ng2-completer",
+              "reason": "ivy-or-ngcc",
+              "hard": true,
+              "highRisk": false,
+              "evidence": "declared"
+            },
+            {
+              "package": "ng2-smart-table",
+              "reason": "ivy-or-ngcc",
+              "hard": true,
+              "highRisk": false,
+              "evidence": "declared-incompatible"
+            }
+          ],
+          "notes": [
+            {
+              "package": "ngx-echarts",
+              "kind": "verify-by-build",
+              "severity": "note",
+              "evidence": "unknown"
+            },
+            {
+              "package": "@nebular/eva-icons",
+              "kind": "verify-by-build",
+              "severity": "note",
+              "evidence": "unknown"
+            },
+            {
+              "package": "@asymmetrik/ngx-leaflet",
+              "kind": "ivy-upgrade",
+              "severity": "note",
+              "evidence": "declared"
+            },
+            {
+              "package": "@swimlane/ngx-charts",
+              "kind": "ivy-upgrade",
+              "severity": "note",
+              "evidence": "declared"
+            },
+            {
+              "package": "ng2-ckeditor",
+              "kind": "ivy-upgrade",
+              "severity": "note",
+              "evidence": "unknown"
+            },
+            {
+              "package": "ngx-echarts",
+              "kind": "ivy-upgrade",
+              "severity": "note",
+              "evidence": "unknown"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

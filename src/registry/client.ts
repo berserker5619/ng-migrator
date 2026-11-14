@@ -14,6 +14,19 @@ export interface VersionMeta {
   engines?: { node?: string };
   deprecated?: string;
   releaseDate?: string;
+  main?: string;
+  module?: string;
+  es2015?: string;
+  esm2015?: string;
+  fesm2015?: string;
+  esm2020?: string;
+  fesm2020?: string;
+  esm2022?: string;
+  fesm2022?: string;
+  exports?: Record<string, unknown> | string;
+  typings?: string;
+  types?: string;
+  metadata?: string;
 }
 
 export interface Packument {
@@ -22,11 +35,14 @@ export interface Packument {
   versions: Record<string, VersionMeta>;
   modified?: string;
   time?: Record<string, string>;
+  repository?: string | { type?: string; url?: string };
+  homepage?: string;
 }
 
 interface CacheEntry {
   fetchedAt: number;
   packument: Packument;
+  fullMetadata?: boolean;
 }
 
 export type FetchLike = (url: string, init: { headers: Record<string, string>; signal?: AbortSignal }) => Promise<{
@@ -50,26 +66,65 @@ export interface RegistryClientOptions {
   timeoutMs?: number;
 }
 
-const CORGI = 'application/vnd.npm.install-v1+json; q=1.0, application/json; q=0.8';
+const CORGI = 'application/json';
+
+const ENTRY_STRING_FIELDS = [
+  'main',
+  'module',
+  'es2015',
+  'esm2015',
+  'fesm2015',
+  'esm2020',
+  'fesm2020',
+  'esm2022',
+  'fesm2022',
+  'typings',
+  'types',
+  'metadata',
+] as const;
 
 function trim(raw: Record<string, unknown>): Packument {
   const versions: Record<string, VersionMeta> = {};
-  const time = (raw.time ?? {}) as Record<string, string>;
-  for (const [v, meta] of Object.entries((raw.versions ?? {}) as Record<string, Record<string, unknown>>)) {
+  const rawVersions =
+    raw?.versions && typeof raw.versions === 'object' ? (raw.versions as Record<string, unknown>) : {};
+  const time = raw?.time && typeof raw.time === 'object' ? (raw.time as Record<string, string>) : {};
+  for (const [v, metaVal] of Object.entries(rawVersions)) {
+    if (!metaVal || typeof metaVal !== 'object') continue;
+    const meta = metaVal as Record<string, unknown>;
     const m: VersionMeta = { version: v };
-    if (meta.peerDependencies) m.peerDependencies = meta.peerDependencies as Record<string, string>;
-    if (meta.peerDependenciesMeta) m.peerDependenciesMeta = meta.peerDependenciesMeta as VersionMeta['peerDependenciesMeta'];
-    if (meta.engines && typeof (meta.engines as { node?: unknown }).node === 'string') m.engines = { node: (meta.engines as { node: string }).node };
+    if (meta.peerDependencies && typeof meta.peerDependencies === 'object') {
+      m.peerDependencies = meta.peerDependencies as Record<string, string>;
+    }
+    if (meta.peerDependenciesMeta && typeof meta.peerDependenciesMeta === 'object') {
+      m.peerDependenciesMeta = meta.peerDependenciesMeta as VersionMeta['peerDependenciesMeta'];
+    }
+    if (meta.engines && typeof (meta.engines as { node?: unknown }).node === 'string') {
+      m.engines = { node: (meta.engines as { node: string }).node };
+    }
     if (typeof meta.deprecated === 'string' && meta.deprecated !== '') m.deprecated = meta.deprecated;
     if (typeof time[v] === 'string') m.releaseDate = time[v];
+    for (const field of ENTRY_STRING_FIELDS) {
+      if (typeof meta[field] === 'string') {
+        m[field] = meta[field] as string;
+      }
+    }
+    if (meta.exports !== undefined && meta.exports !== null) {
+      m.exports = meta.exports as VersionMeta['exports'];
+    }
     versions[v] = m;
   }
+  const repository =
+    typeof raw?.repository === 'string' || (raw?.repository && typeof raw.repository === 'object')
+      ? (raw.repository as Packument['repository'])
+      : undefined;
   return {
-    name: String(raw.name),
-    distTags: (raw['dist-tags'] ?? {}) as Record<string, string>,
+    name: String(raw?.name ?? ''),
+    distTags: (raw?.['dist-tags'] && typeof raw['dist-tags'] === 'object' ? raw['dist-tags'] : {}) as Record<string, string>,
     versions,
-    ...(typeof raw.modified === 'string' ? { modified: raw.modified } : {}),
+    ...(typeof raw?.modified === 'string' ? { modified: raw.modified } : {}),
     ...(Object.keys(time).length > 0 ? { time } : {}),
+    ...(repository ? { repository } : {}),
+    ...(typeof raw?.homepage === 'string' ? { homepage: raw.homepage } : {}),
   };
 }
 
@@ -114,7 +169,14 @@ export class RegistryClient {
     const now = this.options.now ?? Date.now;
     const cached = await this.readCache(name);
     const ttl = this.options.ttlMs ?? 24 * 60 * 60 * 1000;
-    if (cached && (this.options.offline || now() - cached.fetchedAt < ttl)) return cached.packument;
+    if (cached && this.options.offline) return cached.packument;
+    if (
+      cached &&
+      now() - cached.fetchedAt < ttl &&
+      (cached.fullMetadata === true || cached.packument.time !== undefined)
+    ) {
+      return cached.packument;
+    }
     if (this.options.offline) {
       throw new NgmError('NGM-6004', `No cached metadata for ${name} and --offline was given.`, {
         hint: 'Run once without --offline to fill the cache.',
@@ -143,7 +205,10 @@ export class RegistryClient {
 
     if (status === 200) {
       const packument = trim(body as Record<string, unknown>);
-      await atomicWrite(this.cacheFile(name), `${JSON.stringify({ fetchedAt: now(), packument } satisfies CacheEntry)}\n`).catch(
+      await atomicWrite(
+        this.cacheFile(name),
+        `${JSON.stringify({ fetchedAt: now(), packument, fullMetadata: true } satisfies CacheEntry)}\n`,
+      ).catch(
         () => undefined,
       );
       return packument;
@@ -182,15 +247,23 @@ export class RegistryClient {
 
 /** Stable releases, newest first. */
 export function stableVersionsDesc(p: Packument): string[] {
+  if (!p || !p.versions || typeof p.versions !== 'object') return [];
   return Object.keys(p.versions)
-    .filter((v) => semver.valid(v) && semver.prerelease(v) === null)
+    .filter(
+      (v) =>
+        Boolean(p.versions[v]) &&
+        typeof p.versions[v] === 'object' &&
+        semver.valid(v) !== null &&
+        semver.prerelease(v) === null,
+    )
     .sort(semver.rcompare);
 }
 
 /** All valid releases (including prereleases), newest first. */
 export function allVersionsDesc(p: Packument): string[] {
+  if (!p || !p.versions || typeof p.versions !== 'object') return [];
   return Object.keys(p.versions)
-    .filter((v) => semver.valid(v) !== null)
+    .filter((v) => Boolean(p.versions[v]) && typeof p.versions[v] === 'object' && semver.valid(v) !== null)
     .sort(semver.rcompare);
 }
 

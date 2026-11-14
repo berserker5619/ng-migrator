@@ -212,6 +212,7 @@ async function isViewEngineLibrary(root: string, name: string): Promise<boolean>
   const pkg = await readJsonIfExists<PackageJson>(file).catch(() => undefined);
   if (!pkg) return false;
   if (pkg.__processed_by_ivy_ngcc__ !== undefined) return true;
+  if (typeof (pkg as Record<string, unknown>).metadata === 'string') return true;
   const typings = pkg.typings ?? pkg.types;
   if (!typings || !typings.endsWith('.d.ts')) return false;
   // Libraries in View Engine format ship a .metadata.json next to their typings entry.

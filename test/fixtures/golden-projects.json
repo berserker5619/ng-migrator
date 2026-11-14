@@ -1,0 +1,1460 @@
+{
+  "projects": {
+    "angular-13-login": {
+      "name": "angular13-jwt-auth",
+      "angular": {
+        "declared": "~13.0.0",
+        "installed": "13.0.3",
+        "version": "13.0.3",
+        "major": 13
+      },
+      "packageManager": {
+        "name": "npm",
+        "source": "lockfile",
+        "lockfile": "package-lock.json"
+      },
+      "workspace": "single",
+      "angularProjects": [
+        "Angular13JwtAuth"
+      ],
+      "style": "ngmodule",
+      "dependencies": [
+        {
+          "name": "@angular-devkit/build-angular",
+          "declared": "~13.0.2",
+          "type": "devDependencies",
+          "installed": "13.0.4"
+        },
+        {
+          "name": "@angular/animations",
+          "declared": "~13.0.0",
+          "type": "dependencies",
+          "installed": "13.0.3"
+        },
+        {
+          "name": "@angular/cli",
+          "declared": "~13.0.2",
+          "type": "devDependencies",
+          "installed": "13.0.4"
+        },
+        {
+          "name": "@angular/common",
+          "declared": "~13.0.0",
+          "type": "dependencies",
+          "installed": "13.0.3"
+        },
+        {
+          "name": "@angular/compiler",
+          "declared": "~13.0.0",
+          "type": "dependencies",
+          "installed": "13.0.3"
+        },
+        {
+          "name": "@angular/compiler-cli",
+          "declared": "~13.0.0",
+          "type": "devDependencies",
+          "installed": "13.0.3"
+        },
+        {
+          "name": "@angular/core",
+          "declared": "~13.0.0",
+          "type": "dependencies",
+          "installed": "13.0.3"
+        },
+        {
+          "name": "@angular/forms",
+          "declared": "~13.0.0",
+          "type": "dependencies",
+          "installed": "13.0.3"
+        },
+        {
+          "name": "@angular/platform-browser",
+          "declared": "~13.0.0",
+          "type": "dependencies",
+          "installed": "13.0.3"
+        },
+        {
+          "name": "@angular/platform-browser-dynamic",
+          "declared": "~13.0.0",
+          "type": "dependencies",
+          "installed": "13.0.3"
+        },
+        {
+          "name": "@angular/router",
+          "declared": "~13.0.0",
+          "type": "dependencies",
+          "installed": "13.0.3"
+        },
+        {
+          "name": "@types/jasmine",
+          "declared": "~3.10.0",
+          "type": "devDependencies",
+          "installed": "3.10.2"
+        },
+        {
+          "name": "@types/node",
+          "declared": "^12.11.1",
+          "type": "devDependencies",
+          "installed": "12.20.37"
+        },
+        {
+          "name": "jasmine-core",
+          "declared": "~3.10.0",
+          "type": "devDependencies",
+          "installed": "3.10.1"
+        },
+        {
+          "name": "karma",
+          "declared": "~6.3.0",
+          "type": "devDependencies",
+          "installed": "6.3.9"
+        },
+        {
+          "name": "karma-chrome-launcher",
+          "declared": "~3.1.0",
+          "type": "devDependencies",
+          "installed": "3.1.0"
+        },
+        {
+          "name": "karma-coverage",
+          "declared": "~2.0.3",
+          "type": "devDependencies",
+          "installed": "2.0.3"
+        },
+        {
+          "name": "karma-jasmine",
+          "declared": "~4.0.0",
+          "type": "devDependencies",
+          "installed": "4.0.1"
+        },
+        {
+          "name": "karma-jasmine-html-reporter",
+          "declared": "~1.7.0",
+          "type": "devDependencies",
+          "installed": "1.7.0"
+        },
+        {
+          "name": "rxjs",
+          "declared": "~7.4.0",
+          "type": "dependencies",
+          "installed": "7.4.0"
+        },
+        {
+          "name": "tslib",
+          "declared": "^2.3.0",
+          "type": "dependencies",
+          "installed": "2.3.1"
+        },
+        {
+          "name": "typescript",
+          "declared": "~4.4.3",
+          "type": "devDependencies",
+          "installed": "4.4.4"
+        },
+        {
+          "name": "zone.js",
+          "declared": "~0.11.4",
+          "type": "dependencies",
+          "installed": "0.11.4"
+        }
+      ],
+      "overrides": [],
+      "viewEngineSuspects": [],
+      "ngccScripts": [],
+      "hasNodeModules": false,
+      "hasNpmWorkspaces": false,
+      "warnings": [
+        "node_modules not found: installed versions come from the lockfile, and the View Engine check is skipped."
+      ],
+      "stubFiles": {
+        "src/app.ts": "export const app = true;\n"
+      }
+    },
+    "angular-14-login": {
+      "name": "angular-registration-login-example",
+      "angular": {
+        "declared": "^14.2.0",
+        "installed": "14.2.12",
+        "version": "14.2.12",
+        "major": 14
+      },
+      "packageManager": {
+        "name": "npm",
+        "source": "lockfile",
+        "lockfile": "package-lock.json"
+      },
+      "workspace": "single",
+      "angularProjects": [
+        "angular-registration-login-example"
+      ],
+      "style": "ngmodule",
+      "dependencies": [
+        {
+          "name": "@angular-devkit/build-angular",
+          "declared": "^14.2.8",
+          "type": "devDependencies",
+          "installed": "14.2.10"
+        },
+        {
+          "name": "@angular/animations",
+          "declared": "^14.2.0",
+          "type": "dependencies",
+          "installed": "14.2.12"
+        },
+        {
+          "name": "@angular/cli",
+          "declared": "~14.2.8",
+          "type": "devDependencies",
+          "installed": "14.2.10"
+        },
+        {
+          "name": "@angular/common",
+          "declared": "^14.2.0",
+          "type": "dependencies",
+          "installed": "14.2.12"
+        },
+        {
+          "name": "@angular/compiler",
+          "declared": "^14.2.0",
+          "type": "dependencies",
+          "installed": "14.2.12"
+        },
+        {
+          "name": "@angular/compiler-cli",
+          "declared": "^14.2.0",
+          "type": "devDependencies",
+          "installed": "14.2.12"
+        },
+        {
+          "name": "@angular/core",
+          "declared": "^14.2.0",
+          "type": "dependencies",
+          "installed": "14.2.12"
+        },
+        {
+          "name": "@angular/forms",
+          "declared": "^14.2.0",
+          "type": "dependencies",
+          "installed": "14.2.12"
+        },
+        {
+          "name": "@angular/platform-browser",
+          "declared": "^14.2.0",
+          "type": "dependencies",
+          "installed": "14.2.12"
+        },
+        {
+          "name": "@angular/platform-browser-dynamic",
+          "declared": "^14.2.0",
+          "type": "dependencies",
+          "installed": "14.2.12"
+        },
+        {
+          "name": "@angular/router",
+          "declared": "^14.2.0",
+          "type": "dependencies",
+          "installed": "14.2.12"
+        },
+        {
+          "name": "@types/jasmine",
+          "declared": "~4.0.0",
+          "type": "devDependencies",
+          "installed": "4.0.3"
+        },
+        {
+          "name": "jasmine-core",
+          "declared": "~4.3.0",
+          "type": "devDependencies",
+          "installed": "4.3.0"
+        },
+        {
+          "name": "karma",
+          "declared": "~6.4.0",
+          "type": "devDependencies",
+          "installed": "6.4.1"
+        },
+        {
+          "name": "karma-chrome-launcher",
+          "declared": "~3.1.0",
+          "type": "devDependencies",
+          "installed": "3.1.1"
+        },
+        {
+          "name": "karma-coverage",
+          "declared": "~2.2.0",
+          "type": "devDependencies",
+          "installed": "2.2.0"
+        },
+        {
+          "name": "karma-jasmine",
+          "declared": "~5.1.0",
+          "type": "devDependencies",
+          "installed": "5.1.0"
+        },
+        {
+          "name": "karma-jasmine-html-reporter",
+          "declared": "~2.0.0",
+          "type": "devDependencies",
+          "installed": "2.0.0"
+        },
+        {
+          "name": "rxjs",
+          "declared": "~7.5.0",
+          "type": "dependencies",
+          "installed": "7.5.7"
+        },
+        {
+          "name": "tslib",
+          "declared": "^2.3.0",
+          "type": "dependencies",
+          "installed": "2.4.1"
+        },
+        {
+          "name": "typescript",
+          "declared": "~4.7.2",
+          "type": "devDependencies",
+          "installed": "4.7.4"
+        },
+        {
+          "name": "zone.js",
+          "declared": "~0.11.4",
+          "type": "dependencies",
+          "installed": "0.11.8"
+        }
+      ],
+      "overrides": [],
+      "viewEngineSuspects": [],
+      "ngccScripts": [],
+      "hasNodeModules": true,
+      "hasNpmWorkspaces": false,
+      "warnings": [],
+      "stubFiles": {
+        "src/app.ts": "export const app = true;\n"
+      }
+    },
+    "angular-15-signup-boilerplate": {
+      "name": "angular-15-example",
+      "angular": {
+        "declared": "^15.0.0",
+        "installed": "15.2.6",
+        "version": "15.2.6",
+        "major": 15
+      },
+      "packageManager": {
+        "name": "npm",
+        "source": "lockfile",
+        "lockfile": "package-lock.json"
+      },
+      "workspace": "single",
+      "angularProjects": [
+        "angular-15-example"
+      ],
+      "style": "ngmodule",
+      "dependencies": [
+        {
+          "name": "@angular-devkit/build-angular",
+          "declared": "^15.0.1",
+          "type": "devDependencies",
+          "installed": "15.2.5"
+        },
+        {
+          "name": "@angular/animations",
+          "declared": "^15.0.0",
+          "type": "dependencies",
+          "installed": "15.2.6"
+        },
+        {
+          "name": "@angular/cli",
+          "declared": "~15.0.1",
+          "type": "devDependencies",
+          "installed": "15.0.5"
+        },
+        {
+          "name": "@angular/common",
+          "declared": "^15.0.0",
+          "type": "dependencies",
+          "installed": "15.2.6"
+        },
+        {
+          "name": "@angular/compiler",
+          "declared": "^15.0.0",
+          "type": "dependencies",
+          "installed": "15.2.6"
+        },
+        {
+          "name": "@angular/compiler-cli",
+          "declared": "^15.0.0",
+          "type": "devDependencies",
+          "installed": "15.2.6"
+        },
+        {
+          "name": "@angular/core",
+          "declared": "^15.0.0",
+          "type": "dependencies",
+          "installed": "15.2.6"
+        },
+        {
+          "name": "@angular/forms",
+          "declared": "^15.0.0",
+          "type": "dependencies",
+          "installed": "15.2.6"
+        },
+        {
+          "name": "@angular/platform-browser",
+          "declared": "^15.0.0",
+          "type": "dependencies",
+          "installed": "15.2.6"
+        },
+        {
+          "name": "@angular/platform-browser-dynamic",
+          "declared": "^15.0.0",
+          "type": "dependencies",
+          "installed": "15.2.6"
+        },
+        {
+          "name": "@angular/router",
+          "declared": "^15.0.0",
+          "type": "dependencies",
+          "installed": "15.2.6"
+        },
+        {
+          "name": "@types/jasmine",
+          "declared": "~4.3.0",
+          "type": "devDependencies",
+          "installed": "4.3.1"
+        },
+        {
+          "name": "jasmine-core",
+          "declared": "~4.5.0",
+          "type": "devDependencies",
+          "installed": "4.5.0"
+        },
+        {
+          "name": "karma",
+          "declared": "~6.4.0",
+          "type": "devDependencies",
+          "installed": "6.4.1"
+        },
+        {
+          "name": "karma-chrome-launcher",
+          "declared": "~3.1.0",
+          "type": "devDependencies",
+          "installed": "3.1.1"
+        },
+        {
+          "name": "karma-coverage",
+          "declared": "~2.2.0",
+          "type": "devDependencies",
+          "installed": "2.2.0"
+        },
+        {
+          "name": "karma-jasmine",
+          "declared": "~5.1.0",
+          "type": "devDependencies",
+          "installed": "5.1.0"
+        },
+        {
+          "name": "karma-jasmine-html-reporter",
+          "declared": "~2.0.0",
+          "type": "devDependencies",
+          "installed": "2.0.0"
+        },
+        {
+          "name": "rxjs",
+          "declared": "~7.5.0",
+          "type": "dependencies",
+          "installed": "7.5.7"
+        },
+        {
+          "name": "tslib",
+          "declared": "^2.3.0",
+          "type": "dependencies",
+          "installed": "2.5.0"
+        },
+        {
+          "name": "typescript",
+          "declared": "~4.8.2",
+          "type": "devDependencies",
+          "installed": "4.8.4"
+        },
+        {
+          "name": "zone.js",
+          "declared": "~0.12.0",
+          "type": "dependencies",
+          "installed": "0.12.0"
+        }
+      ],
+      "overrides": [],
+      "viewEngineSuspects": [],
+      "ngccScripts": [],
+      "hasNodeModules": false,
+      "hasNpmWorkspaces": false,
+      "warnings": [
+        "node_modules not found: installed versions come from the lockfile, and the View Engine check is skipped."
+      ],
+      "stubFiles": {
+        "src/app.ts": "export const app = true;\n"
+      }
+    },
+    "k8s-istio-observe-frontend": {
+      "name": "k8s-istio-observe-frontend",
+      "angular": {
+        "declared": "^12.0.1",
+        "version": "12.0.1",
+        "major": 12
+      },
+      "packageManager": {
+        "name": "npm",
+        "source": "default"
+      },
+      "workspace": "angular-multi",
+      "angularProjects": [
+        "observe-stack",
+        "observe-stack-e2e"
+      ],
+      "style": "ngmodule",
+      "dependencies": [
+        {
+          "name": "@angular-devkit/build-angular",
+          "declared": "^12.0.1",
+          "type": "devDependencies"
+        },
+        {
+          "name": "@angular-devkit/core",
+          "declared": "^12.0.1",
+          "type": "devDependencies"
+        },
+        {
+          "name": "@angular/animations",
+          "declared": "^12.0.1",
+          "type": "dependencies"
+        },
+        {
+          "name": "@angular/cli",
+          "declared": "^12.0.1",
+          "type": "devDependencies"
+        },
+        {
+          "name": "@angular/common",
+          "declared": "^12.0.1",
+          "type": "dependencies"
+        },
+        {
+          "name": "@angular/compiler",
+          "declared": "^12.0.1",
+          "type": "dependencies"
+        },
+        {
+          "name": "@angular/compiler-cli",
+          "declared": "^12.0.1",
+          "type": "devDependencies"
+        },
+        {
+          "name": "@angular/core",
+          "declared": "^12.0.1",
+          "type": "dependencies"
+        },
+        {
+          "name": "@angular/forms",
+          "declared": "^12.0.1",
+          "type": "dependencies"
+        },
+        {
+          "name": "@angular/language-service",
+          "declared": "^12.0.1",
+          "type": "devDependencies"
+        },
+        {
+          "name": "@angular/platform-browser",
+          "declared": "^12.0.1",
+          "type": "dependencies"
+        },
+        {
+          "name": "@angular/platform-browser-dynamic",
+          "declared": "^12.0.1",
+          "type": "dependencies"
+        },
+        {
+          "name": "@angular/router",
+          "declared": "^12.0.1",
+          "type": "dependencies"
+        },
+        {
+          "name": "@types/jasmine",
+          "declared": "^3.7.4",
+          "type": "devDependencies"
+        },
+        {
+          "name": "@types/jasminewd2",
+          "declared": "^2.0.2",
+          "type": "devDependencies"
+        },
+        {
+          "name": "@types/node",
+          "declared": "^15.6.1",
+          "type": "devDependencies"
+        },
+        {
+          "name": "bootstrap",
+          "declared": "^5.0.1",
+          "type": "dependencies"
+        },
+        {
+          "name": "build",
+          "declared": "^0.1.4",
+          "type": "dependencies"
+        },
+        {
+          "name": "codelyzer",
+          "declared": "^6.0.2",
+          "type": "devDependencies"
+        },
+        {
+          "name": "core-js",
+          "declared": "^3.13.0",
+          "type": "dependencies"
+        },
+        {
+          "name": "eslint",
+          "declared": "^7.27.0",
+          "type": "devDependencies"
+        },
+        {
+          "name": "jasmine-core",
+          "declared": "^3.7.1",
+          "type": "devDependencies"
+        },
+        {
+          "name": "jasmine-spec-reporter",
+          "declared": "^7.0.0",
+          "type": "devDependencies"
+        },
+        {
+          "name": "jquery",
+          "declared": "^3.6.0",
+          "type": "dependencies"
+        },
+        {
+          "name": "karma",
+          "declared": "^6.3.2",
+          "type": "devDependencies"
+        },
+        {
+          "name": "karma-chrome-launcher",
+          "declared": "^3.1.0",
+          "type": "devDependencies"
+        },
+        {
+          "name": "karma-cli",
+          "declared": "^2.0.0",
+          "type": "devDependencies"
+        },
+        {
+          "name": "karma-coverage-istanbul-reporter",
+          "declared": "^3.0.3",
+          "type": "devDependencies"
+        },
+        {
+          "name": "karma-jasmine",
+          "declared": "^4.0.1",
+          "type": "devDependencies"
+        },
+        {
+          "name": "karma-jasmine-html-reporter",
+          "declared": "^1.6.0",
+          "type": "devDependencies"
+        },
+        {
+          "name": "ngx-logger",
+          "declared": "^4.2.2",
+          "type": "dependencies"
+        },
+        {
+          "name": "npm",
+          "declared": "^7.14.0",
+          "type": "dependencies"
+        },
+        {
+          "name": "protractor",
+          "declared": "^7.0.0",
+          "type": "devDependencies"
+        },
+        {
+          "name": "run",
+          "declared": "^1.4.0",
+          "type": "dependencies"
+        },
+        {
+          "name": "rxjs",
+          "declared": "^6.4.0",
+          "type": "dependencies"
+        },
+        {
+          "name": "ts-node",
+          "declared": "^10.0.0",
+          "type": "devDependencies"
+        },
+        {
+          "name": "tslib",
+          "declared": "^2.2.0",
+          "type": "dependencies"
+        },
+        {
+          "name": "tslint",
+          "declared": "^6.1.3",
+          "type": "devDependencies"
+        },
+        {
+          "name": "typescript",
+          "declared": "^4.2.4",
+          "type": "devDependencies"
+        },
+        {
+          "name": "zone.js",
+          "declared": "^0.11.4",
+          "type": "dependencies"
+        }
+      ],
+      "overrides": [],
+      "viewEngineSuspects": [],
+      "ngccScripts": [],
+      "hasNodeModules": false,
+      "hasNpmWorkspaces": false,
+      "warnings": [
+        "node_modules not found: installed versions come from the lockfile, and the View Engine check is skipped."
+      ],
+      "stubFiles": {
+        "tslint.json": "{\n  \"rulesDirectory\": [\"codelyzer\"]\n}\n",
+        "src/app.module.ts": "import { LoggerModule } from 'ngx-logger';\nexport const m = LoggerModule;\n"
+      }
+    },
+    "ng-material-starter-kit": {
+      "name": "ng-material-starter-kit-acms",
+      "angular": {
+        "declared": "^14.2.2",
+        "installed": "14.2.2",
+        "version": "14.2.2",
+        "major": 14
+      },
+      "packageManager": {
+        "name": "npm",
+        "source": "lockfile",
+        "lockfile": "package-lock.json"
+      },
+      "workspace": "single",
+      "angularProjects": [
+        "app"
+      ],
+      "style": "ngmodule",
+      "dependencies": [
+        {
+          "name": "@angular-devkit/build-angular",
+          "declared": "^14.2.3",
+          "type": "devDependencies",
+          "installed": "14.2.3"
+        },
+        {
+          "name": "@angular/animations",
+          "declared": "^14.2.2",
+          "type": "dependencies",
+          "installed": "14.2.2"
+        },
+        {
+          "name": "@angular/cdk",
+          "declared": "^14.2.2",
+          "type": "dependencies",
+          "installed": "14.2.2"
+        },
+        {
+          "name": "@angular/cli",
+          "declared": "^14.2.3",
+          "type": "devDependencies",
+          "installed": "14.2.3"
+        },
+        {
+          "name": "@angular/common",
+          "declared": "^14.2.2",
+          "type": "dependencies",
+          "installed": "14.2.2"
+        },
+        {
+          "name": "@angular/compiler",
+          "declared": "^14.2.2",
+          "type": "dependencies",
+          "installed": "14.2.2"
+        },
+        {
+          "name": "@angular/compiler-cli",
+          "declared": "^14.2.2",
+          "type": "devDependencies",
+          "installed": "14.2.2"
+        },
+        {
+          "name": "@angular/core",
+          "declared": "^14.2.2",
+          "type": "dependencies",
+          "installed": "14.2.2"
+        },
+        {
+          "name": "@angular/flex-layout",
+          "declared": "^14.0.0-beta.40",
+          "type": "dependencies",
+          "installed": "14.0.0-beta.40"
+        },
+        {
+          "name": "@angular/forms",
+          "declared": "^14.2.2",
+          "type": "dependencies",
+          "installed": "14.2.2"
+        },
+        {
+          "name": "@angular/material",
+          "declared": "^14.2.2",
+          "type": "dependencies",
+          "installed": "14.2.2"
+        },
+        {
+          "name": "@angular/platform-browser",
+          "declared": "^14.2.2",
+          "type": "dependencies",
+          "installed": "14.2.2"
+        },
+        {
+          "name": "@angular/platform-browser-dynamic",
+          "declared": "^14.2.2",
+          "type": "dependencies",
+          "installed": "14.2.2"
+        },
+        {
+          "name": "@angular/router",
+          "declared": "^14.2.2",
+          "type": "dependencies",
+          "installed": "14.2.2"
+        },
+        {
+          "name": "@types/jasmine",
+          "declared": "~3.10.0",
+          "type": "devDependencies",
+          "installed": "3.10.6"
+        },
+        {
+          "name": "@types/node",
+          "declared": "^12.11.1",
+          "type": "devDependencies",
+          "installed": "12.20.55"
+        },
+        {
+          "name": "jasmine-core",
+          "declared": "~4.0.0",
+          "type": "devDependencies",
+          "installed": "4.0.1"
+        },
+        {
+          "name": "karma",
+          "declared": "~6.3.0",
+          "type": "devDependencies",
+          "installed": "6.3.20"
+        },
+        {
+          "name": "karma-chrome-launcher",
+          "declared": "~3.1.0",
+          "type": "devDependencies",
+          "installed": "3.1.1"
+        },
+        {
+          "name": "karma-coverage",
+          "declared": "~2.1.0",
+          "type": "devDependencies",
+          "installed": "2.1.1"
+        },
+        {
+          "name": "karma-jasmine",
+          "declared": "~4.0.0",
+          "type": "devDependencies",
+          "installed": "4.0.2"
+        },
+        {
+          "name": "karma-jasmine-html-reporter",
+          "declared": "~1.7.0",
+          "type": "devDependencies",
+          "installed": "1.7.0"
+        },
+        {
+          "name": "rxjs",
+          "declared": "~7.5.0",
+          "type": "dependencies",
+          "installed": "7.5.6"
+        },
+        {
+          "name": "tslib",
+          "declared": "^2.3.0",
+          "type": "dependencies",
+          "installed": "2.4.0"
+        },
+        {
+          "name": "typescript",
+          "declared": "~4.6.2",
+          "type": "devDependencies",
+          "installed": "4.6.4"
+        },
+        {
+          "name": "zone.js",
+          "declared": "~0.11.4",
+          "type": "dependencies",
+          "installed": "0.11.8"
+        }
+      ],
+      "overrides": [],
+      "viewEngineSuspects": [],
+      "ngccScripts": [],
+      "hasNodeModules": false,
+      "hasNpmWorkspaces": false,
+      "warnings": [
+        "node_modules not found: installed versions come from the lockfile, and the View Engine check is skipped."
+      ],
+      "stubFiles": {
+        "src/app.ts": "export const app = true;\n"
+      }
+    },
+    "ngx-admin": {
+      "name": "ngx-admin",
+      "angular": {
+        "declared": "^15.2.10",
+        "installed": "15.2.10",
+        "version": "15.2.10",
+        "major": 15
+      },
+      "packageManager": {
+        "name": "npm",
+        "source": "lockfile",
+        "lockfile": "package-lock.json"
+      },
+      "workspace": "angular-multi",
+      "angularProjects": [
+        "ngx-admin-demo",
+        "ngx-admin-demo-e2e"
+      ],
+      "style": "ngmodule",
+      "dependencies": [
+        {
+          "name": "@angular-devkit/build-angular",
+          "declared": "^15.2.10",
+          "type": "devDependencies",
+          "installed": "15.2.10"
+        },
+        {
+          "name": "@angular-eslint/builder",
+          "declared": "15.2.1",
+          "type": "devDependencies",
+          "installed": "15.2.1"
+        },
+        {
+          "name": "@angular-eslint/eslint-plugin",
+          "declared": "15.2.1",
+          "type": "devDependencies",
+          "installed": "15.2.1"
+        },
+        {
+          "name": "@angular-eslint/eslint-plugin-template",
+          "declared": "15.2.1",
+          "type": "devDependencies",
+          "installed": "15.2.1"
+        },
+        {
+          "name": "@angular-eslint/schematics",
+          "declared": "15.2.1",
+          "type": "devDependencies",
+          "installed": "15.2.1"
+        },
+        {
+          "name": "@angular-eslint/template-parser",
+          "declared": "15.2.1",
+          "type": "devDependencies",
+          "installed": "15.2.1"
+        },
+        {
+          "name": "@angular/animations",
+          "declared": "^15.2.10",
+          "type": "dependencies",
+          "installed": "15.2.10"
+        },
+        {
+          "name": "@angular/cdk",
+          "declared": "^15.2.9",
+          "type": "dependencies",
+          "installed": "15.2.9"
+        },
+        {
+          "name": "@angular/cli",
+          "declared": "^15.2.10",
+          "type": "devDependencies",
+          "installed": "15.2.10"
+        },
+        {
+          "name": "@angular/common",
+          "declared": "^15.2.10",
+          "type": "dependencies",
+          "installed": "15.2.10"
+        },
+        {
+          "name": "@angular/compiler",
+          "declared": "^15.2.10",
+          "type": "dependencies",
+          "installed": "15.2.10"
+        },
+        {
+          "name": "@angular/compiler-cli",
+          "declared": "^15.2.10",
+          "type": "devDependencies",
+          "installed": "15.2.10"
+        },
+        {
+          "name": "@angular/core",
+          "declared": "^15.2.10",
+          "type": "dependencies",
+          "installed": "15.2.10"
+        },
+        {
+          "name": "@angular/forms",
+          "declared": "^15.2.10",
+          "type": "dependencies",
+          "installed": "15.2.10"
+        },
+        {
+          "name": "@angular/google-maps",
+          "declared": "^12.2.13",
+          "type": "dependencies",
+          "installed": "12.2.13"
+        },
+        {
+          "name": "@angular/language-service",
+          "declared": "15.2.10",
+          "type": "devDependencies",
+          "installed": "15.2.10"
+        },
+        {
+          "name": "@angular/platform-browser",
+          "declared": "^15.2.10",
+          "type": "dependencies",
+          "installed": "15.2.10"
+        },
+        {
+          "name": "@angular/platform-browser-dynamic",
+          "declared": "^15.2.10",
+          "type": "dependencies",
+          "installed": "15.2.10"
+        },
+        {
+          "name": "@angular/router",
+          "declared": "^15.2.10",
+          "type": "dependencies",
+          "installed": "15.2.10"
+        },
+        {
+          "name": "@asymmetrik/ngx-leaflet",
+          "declared": "3.0.1",
+          "type": "dependencies",
+          "installed": "3.0.1"
+        },
+        {
+          "name": "@compodoc/compodoc",
+          "declared": "1.0.1",
+          "type": "devDependencies",
+          "installed": "1.0.1"
+        },
+        {
+          "name": "@fortawesome/fontawesome-free",
+          "declared": "^5.2.0",
+          "type": "devDependencies",
+          "installed": "5.15.4"
+        },
+        {
+          "name": "@nebular/auth",
+          "declared": "11.0.1",
+          "type": "dependencies",
+          "installed": "11.0.1"
+        },
+        {
+          "name": "@nebular/eva-icons",
+          "declared": "11.0.1",
+          "type": "dependencies",
+          "installed": "11.0.1"
+        },
+        {
+          "name": "@nebular/security",
+          "declared": "11.0.1",
+          "type": "dependencies",
+          "installed": "11.0.1"
+        },
+        {
+          "name": "@nebular/theme",
+          "declared": "11.0.1",
+          "type": "dependencies",
+          "installed": "11.0.1"
+        },
+        {
+          "name": "@swimlane/ngx-charts",
+          "declared": "^14.0.0",
+          "type": "dependencies",
+          "installed": "14.0.0"
+        },
+        {
+          "name": "@types/d3-color",
+          "declared": "1.0.5",
+          "type": "devDependencies",
+          "installed": "1.0.5"
+        },
+        {
+          "name": "@types/jasmine",
+          "declared": "~3.3.0",
+          "type": "devDependencies",
+          "installed": "3.3.16"
+        },
+        {
+          "name": "@types/jasminewd2",
+          "declared": "2.0.3",
+          "type": "devDependencies",
+          "installed": "2.0.3"
+        },
+        {
+          "name": "@types/leaflet",
+          "declared": "1.2.3",
+          "type": "devDependencies",
+          "installed": "1.2.3"
+        },
+        {
+          "name": "@types/node",
+          "declared": "^12.12.70",
+          "type": "devDependencies",
+          "installed": "12.20.51"
+        },
+        {
+          "name": "@typescript-eslint/eslint-plugin",
+          "declared": "^5.43.0",
+          "type": "devDependencies",
+          "installed": "5.54.1"
+        },
+        {
+          "name": "@typescript-eslint/parser",
+          "declared": "^5.43.0",
+          "type": "devDependencies",
+          "installed": "5.54.1"
+        },
+        {
+          "name": "angular2-chartjs",
+          "declared": "0.4.1",
+          "type": "dependencies",
+          "installed": "0.4.1"
+        },
+        {
+          "name": "bootstrap",
+          "declared": "4.3.1",
+          "type": "dependencies",
+          "installed": "4.3.1"
+        },
+        {
+          "name": "chart.js",
+          "declared": "2.7.1",
+          "type": "dependencies",
+          "installed": "2.7.1"
+        },
+        {
+          "name": "ckeditor",
+          "declared": "4.7.3",
+          "type": "dependencies",
+          "installed": "4.7.3"
+        },
+        {
+          "name": "classlist.js",
+          "declared": "1.1.20150312",
+          "type": "dependencies",
+          "installed": "1.1.20150312"
+        },
+        {
+          "name": "codelyzer",
+          "declared": "^6.0.2",
+          "type": "devDependencies",
+          "installed": "6.0.2"
+        },
+        {
+          "name": "conventional-changelog-cli",
+          "declared": "1.3.4",
+          "type": "devDependencies",
+          "installed": "1.3.4"
+        },
+        {
+          "name": "core-js",
+          "declared": "2.5.1",
+          "type": "dependencies",
+          "installed": "2.5.1"
+        },
+        {
+          "name": "echarts",
+          "declared": "^4.9.0",
+          "type": "dependencies",
+          "installed": "4.9.0"
+        },
+        {
+          "name": "eslint",
+          "declared": "^8.28.0",
+          "type": "devDependencies",
+          "installed": "8.30.0"
+        },
+        {
+          "name": "eva-icons",
+          "declared": "^1.1.3",
+          "type": "dependencies",
+          "installed": "1.1.3"
+        },
+        {
+          "name": "husky",
+          "declared": "0.13.3",
+          "type": "devDependencies",
+          "installed": "0.13.3"
+        },
+        {
+          "name": "intl",
+          "declared": "1.2.5",
+          "type": "dependencies",
+          "installed": "1.2.5"
+        },
+        {
+          "name": "ionicons",
+          "declared": "2.0.1",
+          "type": "dependencies",
+          "installed": "2.0.1"
+        },
+        {
+          "name": "jasmine-core",
+          "declared": "~3.6.0",
+          "type": "devDependencies",
+          "installed": "3.6.0"
+        },
+        {
+          "name": "jasmine-spec-reporter",
+          "declared": "~5.0.0",
+          "type": "devDependencies",
+          "installed": "5.0.2"
+        },
+        {
+          "name": "karma",
+          "declared": "~6.3.19",
+          "type": "devDependencies",
+          "installed": "6.3.19"
+        },
+        {
+          "name": "karma-chrome-launcher",
+          "declared": "~3.1.1",
+          "type": "devDependencies",
+          "installed": "3.1.1"
+        },
+        {
+          "name": "karma-cli",
+          "declared": "1.0.1",
+          "type": "devDependencies",
+          "installed": "1.0.1"
+        },
+        {
+          "name": "karma-coverage-istanbul-reporter",
+          "declared": "~3.0.2",
+          "type": "devDependencies",
+          "installed": "3.0.3"
+        },
+        {
+          "name": "karma-jasmine",
+          "declared": "~4.0.2",
+          "type": "devDependencies",
+          "installed": "4.0.2"
+        },
+        {
+          "name": "karma-jasmine-html-reporter",
+          "declared": "^1.7.0",
+          "type": "devDependencies",
+          "installed": "1.7.0"
+        },
+        {
+          "name": "leaflet",
+          "declared": "1.2.0",
+          "type": "dependencies",
+          "installed": "1.2.0"
+        },
+        {
+          "name": "nebular-icons",
+          "declared": "1.1.0",
+          "type": "dependencies",
+          "installed": "1.1.0"
+        },
+        {
+          "name": "ng2-ckeditor",
+          "declared": "~1.2.9",
+          "type": "dependencies",
+          "installed": "1.2.9"
+        },
+        {
+          "name": "ng2-completer",
+          "declared": "^9.0.1",
+          "type": "dependencies",
+          "installed": "9.0.1"
+        },
+        {
+          "name": "ng2-smart-table",
+          "declared": "^1.6.0",
+          "type": "dependencies",
+          "installed": "1.7.2"
+        },
+        {
+          "name": "ngx-echarts",
+          "declared": "^4.2.2",
+          "type": "dependencies",
+          "installed": "4.2.2"
+        },
+        {
+          "name": "node-sass",
+          "declared": "^4.14.1",
+          "type": "dependencies",
+          "installed": "4.14.1"
+        },
+        {
+          "name": "normalize.css",
+          "declared": "6.0.0",
+          "type": "dependencies",
+          "installed": "6.0.0"
+        },
+        {
+          "name": "npm-run-all",
+          "declared": "4.0.2",
+          "type": "devDependencies",
+          "installed": "4.0.2"
+        },
+        {
+          "name": "pace-js",
+          "declared": "1.0.2",
+          "type": "dependencies",
+          "installed": "1.0.2"
+        },
+        {
+          "name": "protractor",
+          "declared": "~7.0.0",
+          "type": "devDependencies",
+          "installed": "7.0.0"
+        },
+        {
+          "name": "rimraf",
+          "declared": "2.6.1",
+          "type": "devDependencies",
+          "installed": "2.6.1"
+        },
+        {
+          "name": "roboto-fontface",
+          "declared": "0.8.0",
+          "type": "dependencies",
+          "installed": "0.8.0"
+        },
+        {
+          "name": "rxjs",
+          "declared": "6.6.2",
+          "type": "dependencies",
+          "installed": "6.6.2"
+        },
+        {
+          "name": "rxjs-compat",
+          "declared": "6.3.0",
+          "type": "dependencies",
+          "installed": "6.3.0"
+        },
+        {
+          "name": "socicon",
+          "declared": "3.0.5",
+          "type": "dependencies",
+          "installed": "3.0.5"
+        },
+        {
+          "name": "style-loader",
+          "declared": "^1.3.0",
+          "type": "dependencies",
+          "installed": "1.3.0"
+        },
+        {
+          "name": "stylelint",
+          "declared": "7.13.0",
+          "type": "devDependencies",
+          "installed": "7.13.0"
+        },
+        {
+          "name": "tinymce",
+          "declared": "4.5.7",
+          "type": "dependencies",
+          "installed": "4.5.7"
+        },
+        {
+          "name": "ts-node",
+          "declared": "3.2.2",
+          "type": "devDependencies",
+          "installed": "3.2.2"
+        },
+        {
+          "name": "tslib",
+          "declared": "^2.3.1",
+          "type": "dependencies",
+          "installed": "2.4.0"
+        },
+        {
+          "name": "tslint",
+          "declared": "~6.1.0",
+          "type": "devDependencies",
+          "installed": "6.1.3"
+        },
+        {
+          "name": "tslint-language-service",
+          "declared": "^0.9.9",
+          "type": "devDependencies",
+          "installed": "0.9.9"
+        },
+        {
+          "name": "typeface-exo",
+          "declared": "0.0.22",
+          "type": "dependencies",
+          "installed": "0.0.22"
+        },
+        {
+          "name": "typescript",
+          "declared": "~4.9.5",
+          "type": "devDependencies",
+          "installed": "4.9.5"
+        },
+        {
+          "name": "web-animations-js",
+          "declared": "^2.3.2",
+          "type": "dependencies",
+          "installed": "2.3.2"
+        },
+        {
+          "name": "zone.js",
+          "declared": "~0.11.4",
+          "type": "dependencies",
+          "installed": "0.11.5"
+        }
+      ],
+      "overrides": [],
+      "viewEngineSuspects": [
+        "@asymmetrik/ngx-leaflet",
+        "@swimlane/ngx-charts",
+        "angular2-chartjs",
+        "ng2-ckeditor",
+        "ng2-completer",
+        "ng2-smart-table",
+        "ngx-echarts"
+      ],
+      "ngccScripts": [
+        "postinstall"
+      ],
+      "hasNodeModules": true,
+      "hasNpmWorkspaces": false,
+      "warnings": [],
+      "stubFiles": {
+        "tslint.json": "{}\n",
+        "src/app.ts": "import { LeafletModule } from '@asymmetrik/ngx-leaflet';\nimport { ChartModule } from 'angular2-chartjs';\nimport { CKEditorModule } from 'ng2-ckeditor';\nimport { Ng2SmartTableModule } from 'ng2-smart-table';\nimport { NgxEchartsModule } from 'ngx-echarts';\nimport { NgxChartsModule } from '@swimlane/ngx-charts';\nexport const modules = [LeafletModule, ChartModule, CKEditorModule, Ng2SmartTableModule, NgxEchartsModule, NgxChartsModule];"
+      }
+    }
+  }
+}

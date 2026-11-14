@@ -59,8 +59,21 @@ export type EvidenceKind =
   | 'declared-compatible'
   | 'declared-incompatible'
   | 'unknown'
+  | 'unknown-low-confidence'
   | 'verified'
   | 'declared';
+
+export interface StepNote {
+  package: string;
+  kind: 'verify-by-build' | 'ivy-upgrade';
+  severity: 'note';
+  evidence: EvidenceKind;
+  message: string;
+  current?: string;
+  target?: string;
+  chosenVersion?: string;
+  newestVersion?: string;
+}
 
 export interface PackageChange {
   name: string;
@@ -108,11 +121,13 @@ export interface Blocker {
   chosenVersionReason?: string;
   evidence?: EvidenceKind;
   unmaintained?: boolean;
+  highRisk?: boolean;
   riskNote?: string;
   /** Newest published version on the registry, for unknown / held back comparisons. */
   newestVersion?: string;
   /** Explanation for unknown evidence classification. */
   unknownExplanation?: string;
+  nextSteps?: string[];
   recommendation?: 'upgrade' | 'alternate' | 'fork' | 'inline' | 'remove' | 'manual';
   recommendedFix?: string;
   source?: 'analysis' | 'rule';
@@ -165,6 +180,7 @@ export interface PlannedStep {
   unchanged: string[];
   heldBack: HeldBack[];
   blockers: Blocker[];
+  notes?: StepNote[];
   /** Packages recommended for removal at an earlier step that depend on that step's decision. */
   dependsOnDecisions?: Array<{ package: string; stepIndex: number }>;
   resolution: ResolutionCheck;
