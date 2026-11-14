@@ -1,3 +1,13 @@
+export function formatElapsed(ms: number): string {
+  const safeMs = Math.max(0, ms);
+  if (safeMs < 1000) return `${Math.round(safeMs)}ms`;
+  const totalSeconds = safeMs / 1000;
+  if (totalSeconds < 60) return `${totalSeconds.toFixed(2)}s`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = (totalSeconds % 60).toFixed(1);
+  return `${minutes}m ${seconds}s`;
+}
+
 export interface OutputOptions {
   color: boolean;
   ascii: boolean;
@@ -22,8 +32,8 @@ export class Output {
 
   get symbols() {
     return this.options.ascii
-      ? { ok: '[ok]', warn: '[!]', fail: '[x]', bullet: '-' }
-      : { ok: '✔', warn: '⚠', fail: '✖', bullet: '•' };
+      ? { ok: '[ok]', warn: '[!]', fail: '[x]', bullet: '-', info: '[i]' }
+      : { ok: '✔', warn: '⚠', fail: '✖', bullet: '•', info: 'ℹ' };
   }
 
   info(text: string): void {
@@ -32,6 +42,10 @@ export class Output {
 
   success(text: string): void {
     this.out.write(`${this.paint(32, this.symbols.ok)} ${text}\n`);
+  }
+
+  progress(text: string): void {
+    this.err.write(`${this.paint(36, this.symbols.info)} ${text}\n`);
   }
 
   warn(text: string): void {

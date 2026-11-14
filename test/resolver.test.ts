@@ -13,10 +13,12 @@ import { normalizeRange, preserveRangeStyle, safeMinVersion, satisfiesAngularPee
 import { isProposedVersionIvyEra, resolveStepDependencies } from '../src/resolver/resolve.js';
 import {
   detectYarnLockfileFlavor,
+  enrichBlockersWithResolutionCheck,
   parseNpmEresolve,
   parsePeerConflicts,
   parseYarnVersionFlavor,
   pruneYarnLockEntries,
+  resolveFixablePeerConflicts,
   verifyWithPackageManager,
 } from '../src/resolver/verify.js';
 import { tempProject, writeCacheEntry } from './helpers.js';
@@ -1741,7 +1743,7 @@ describe('Manifest vs Lockfile Disagreement and View Engine Warnings', () => {
     }
   });
 
-  it('enforces date cutoff rule (<= Angular n+1) for ngx-logger and ngx-echarts, marks unknown-low-confidence when none qualify, and ignores core packages', async () => {
+  it('gives major alignment (Signal b) precedence over Angular n+1 date cutoff (ngx-echarts 16.2.0) while enforcing date cutoff when no alignment exists, and ignores core packages', async () => {
     const project: ProjectInfo = {
       root: 'l:/fake/date-cutoff-app',
       name: 'date-cutoff-app',
@@ -1756,6 +1758,7 @@ describe('Manifest vs Lockfile Disagreement and View Engine Warnings', () => {
         { name: 'tslib', declared: '^2.3.0', installed: '2.4.1', type: 'dependencies' },
         { name: 'zone.js', declared: '~0.13.0', installed: '0.13.3', type: 'dependencies' },
         { name: 'ngx-echarts', declared: '^15.0.0', installed: '15.0.3', type: 'dependencies' },
+        { name: 'ngx-dated-lib', declared: '^1.0.0', installed: '1.0.0', type: 'dependencies' },
         { name: 'ngx-future-only', declared: '^1.0.0', installed: '1.0.0', type: 'dependencies' },
       ],
       overrides: [],
@@ -1806,6 +1809,22 @@ describe('Manifest vs Lockfile Disagreement and View Engine Warnings', () => {
             },
           };
         }
+        if (name === 'ngx-dated-lib') {
+          return {
+            name: 'ngx-dated-lib',
+            distTags: { latest: '1.3.0' },
+            time: {
+              '1.0.0': '2023-01-01T00:00:00.000Z',
+              '1.2.0': '2023-09-01T00:00:00.000Z',
+              '1.3.0': '2024-01-15T00:00:00.000Z',
+            },
+            versions: {
+              '1.0.0': { version: '1.0.0', peerDependencies: {} },
+              '1.2.0': { version: '1.2.0', peerDependencies: {} },
+              '1.3.0': { version: '1.3.0', peerDependencies: {} },
+            },
+          };
+        }
         if (name === 'ngx-future-only') {
           return {
             name: 'ngx-future-only',
@@ -1835,13 +1854,21 @@ describe('Manifest vs Lockfile Disagreement and View Engine Warnings', () => {
       expect(result.notes.find((n) => n.package === corePkg)).toBeUndefined();
     }
 
-    // ngx-echarts picks 16.1.1 (<= Angular 17 release date 2023-11-08) over 16.2.0 (2023-11-10)
+    // Signal (b) precedence: ngx-echarts picks newest aligned major 16.2.0 even though published 2023-11-10 > Angular 17 (2023-11-08)
     // and is NOT marked unmaintained because newest 22.0.0 is from 2026
     const echartsChange = result.changes.find((c) => c.name === 'ngx-echarts');
-    expect(echartsChange?.target).toBe('16.1.1');
+    expect(echartsChange?.target).toBe('16.2.0');
+    expect(echartsChange?.newestVersion).toBe('22.0.0');
     expect(echartsChange?.evidence).toBe('unknown');
+    expect(echartsChange?.reason).toContain('> Angular 17 release 2023-11-08');
     expect(result.blockers.find((b) => b.package === 'ngx-echarts')).toBeUndefined();
     expect(result.notes.find((n) => n.package === 'ngx-echarts' && n.kind === 'verify-by-build')).toBeDefined();
+
+    // Signal (c) date limit when no alignment exists: ngx-dated-lib picks 1.2.0 (<= 2023-11-08) over 1.3.0 (2024-01-15)
+    const datedChange = result.changes.find((c) => c.name === 'ngx-dated-lib');
+    expect(datedChange?.target).toBe('1.2.0');
+    expect(datedChange?.newestVersion).toBe('1.3.0');
+    expect(datedChange?.evidence).toBe('unknown');
 
     // ngx-future-only had no releases published <= Angular 17 release date -> unknown-low-confidence note
     const futureChange = result.changes.find((c) => c.name === 'ngx-future-only');
@@ -2084,6 +2111,146 @@ describe('Manifest vs Lockfile Disagreement and View Engine Warnings', () => {
     expect(res.changes.find((c) => c.name === '@nebular/eva-icons')?.target).toBe('12.0.0');
     expect(res.blockers.some((b) => b.package === '@nebular/eva-icons')).toBe(false);
     expect(res.notes.find((n) => n.package === '@nebular/eva-icons')?.evidence).toBe('unknown');
+  });
+
+  it('proposes companion direct-dependency upgrade from recorded npm ERESOLVE and clears hard blocker when re-check confirms', async () => {
+    const eresolveRaw = await readFile(
+      path.join(process.cwd(), 'test', 'fixtures', 'resolution', 'npm-eresolve-fixable-echarts.txt'),
+      'utf8',
+    );
+    const parsedConflicts = parsePeerConflicts(eresolveRaw);
+    expect(parsedConflicts).toEqual([
+      {
+        peer: 'echarts',
+        range: '>=5.0.0',
+        requiredBy: 'ngx-echarts@16.2.0',
+        found: 'echarts@4.9.0',
+      },
+    ]);
+
+    const project: ProjectInfo = {
+      root: 'l:/fake/ngx-admin-echarts',
+      name: 'ngx-admin',
+      packageManager: { name: 'npm', source: 'lockfile' },
+      workspace: 'single',
+      angularProjects: [],
+      angular: { version: '15.2.10', major: 15 },
+      style: 'ngmodule',
+      dependencies: [
+        { name: '@angular/core', declared: '^15.2.10', installed: '15.2.10', type: 'dependencies' },
+        { name: 'ngx-echarts', declared: '^15.0.3', installed: '15.0.3', type: 'dependencies' },
+        { name: 'echarts', declared: '^4.9.0', installed: '4.9.0', type: 'dependencies' },
+      ],
+      overrides: [],
+      viewEngineSuspects: [],
+      ngccScripts: [],
+      hasNodeModules: false,
+      hasNpmWorkspaces: false,
+      warnings: [],
+    };
+
+    const registry = {
+      async packument(name: string) {
+        if (name === 'echarts') {
+          return {
+            name: 'echarts',
+            distTags: { latest: '6.1.0' },
+            versions: {
+              '4.9.0': { version: '4.9.0' },
+              '5.5.1': { version: '5.5.1' },
+              '5.6.0': { version: '5.6.0' },
+              '6.0.0': { version: '6.0.0' },
+              '6.1.0': { version: '6.1.0' },
+            },
+          };
+        }
+        return undefined;
+      },
+    } as unknown as RegistryClient;
+
+    const initialChanges = [
+      {
+        name: 'ngx-echarts',
+        type: 'dependencies' as const,
+        current: '15.0.3',
+        currentSpec: '^15.0.3',
+        target: '16.2.0',
+        targetSpec: '^16.2.0',
+        reason: 'Aligned major',
+        evidence: 'unknown' as const,
+      },
+    ];
+
+    const recheckCalls: Array<{ names: string[] }> = [];
+    const fixed = await resolveFixablePeerConflicts({
+      project,
+      registry,
+      packageManager: 'npm',
+      changes: initialChanges,
+      resolutionCheck: {
+        status: 'conflict',
+        packageManager: 'npm',
+        detail: eresolveRaw,
+        conflicts: parsedConflicts,
+      },
+      verifyFn: async (opts) => {
+        recheckCalls.push({ names: opts.changes.map((c) => `${c.name}@${c.target}`) });
+        const hasEcharts5 = opts.changes.some((c) => c.name === 'echarts' && c.target === '5.6.0');
+        return {
+          status: hasEcharts5 ? 'confirmed' : 'conflict',
+          packageManager: 'npm',
+        };
+      },
+    });
+
+    expect(recheckCalls).toHaveLength(1);
+    expect(recheckCalls[0]?.names).toContain('echarts@5.6.0');
+    expect(fixed.resolutionCheck.status).toBe('confirmed');
+    expect(fixed.changes.find((c) => c.name === 'echarts')).toMatchObject({
+      target: '5.6.0',
+      targetSpec: '^5.6.0',
+    });
+    expect(fixed.companionNotes[0]?.kind).toBe('companion-upgrade');
+    expect(fixed.companionNotes[0]?.message).toContain('also upgrade echarts to 5.6.0');
+    expect(fixed.companionNotes[0]?.message).toContain('risk: breaking changes between 4 and 5, check usage');
+    expect(fixed.companionRisks[0]).toContain('risk: breaking changes between 4 and 5, check usage');
+
+    const blockers: import('../src/model.js').Blocker[] = [];
+    enrichBlockersWithResolutionCheck(blockers, fixed.resolutionCheck, project, 16, 'npm');
+    expect(blockers.filter((b) => b.reason === 'peer-conflict')).toHaveLength(0);
+
+    // When the re-check STILL fails on echarts, revert companion proposal and keep the hard blocker
+    const stillFails = await resolveFixablePeerConflicts({
+      project,
+      registry,
+      packageManager: 'npm',
+      changes: initialChanges,
+      resolutionCheck: {
+        status: 'conflict',
+        packageManager: 'npm',
+        detail: eresolveRaw,
+        conflicts: parsedConflicts,
+      },
+      verifyFn: async () => ({
+        status: 'conflict',
+        packageManager: 'npm',
+        conflicts: [
+          {
+            peer: 'echarts',
+            range: '^4.0.0',
+            requiredBy: 'echarts-for-react@2.0.16',
+            found: 'echarts@5.6.0',
+          },
+        ],
+      }),
+    });
+
+    expect(stillFails.resolutionCheck.status).toBe('conflict');
+    expect(stillFails.changes.find((c) => c.name === 'echarts')).toBeUndefined();
+    expect(stillFails.companionNotes).toHaveLength(0);
+    const failBlockers: import('../src/model.js').Blocker[] = [];
+    enrichBlockersWithResolutionCheck(failBlockers, stillFails.resolutionCheck, project, 16, 'npm');
+    expect(failBlockers.some((b) => b.package === 'ngx-echarts' && b.reason === 'peer-conflict' && b.hard)).toBe(true);
   });
 });
 

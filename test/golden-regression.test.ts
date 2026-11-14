@@ -147,32 +147,140 @@ describe('Offline golden regression suite', () => {
     }
   });
 
-  it('requires a Golden-Update commit-message explanation whenever corpus/golden-counts.json changes', async () => {
-    const statusRes = await run(
-      'git',
-      ['--no-optional-locks', 'status', '--porcelain', '--', 'corpus/golden-counts.json'],
-      { cwd: REPO_ROOT },
-    );
-    const dirty = statusRes.stdout.trim();
+async function verifyGoldenUpdateGuard(
+  repoRoot: string,
+  preCommitReason: string = process.env.NGM_GOLDEN_UPDATE_REASON ?? '',
+): Promise<{ status: 'dirty-ok' | 'clean-ok' | 'skipped'; message: string }> {
+  const statusRes = await run(
+    'git',
+    ['--no-optional-locks', 'status', '--porcelain', '--', 'corpus/golden-counts.json'],
+    { cwd: repoRoot },
+  );
+  const dirty = statusRes.stdout.trim();
 
-    if (dirty.length > 0) {
-      // During pre-commit development/testing, require an explicit explanation env var.
-      const preCommitReason = process.env.NGM_GOLDEN_UPDATE_REASON ?? '';
-      expect(
-        preCommitReason,
-        'Uncommitted change in corpus/golden-counts.json requires NGM_GOLDEN_UPDATE_REASON="Golden-Update: <explanation>" before committing.',
-      ).toMatch(/Golden-Update:\s+\S+/);
-      return;
+  if (dirty.length > 0) {
+    expect(
+      preCommitReason,
+      'Uncommitted change in corpus/golden-counts.json requires NGM_GOLDEN_UPDATE_REASON="Golden-Update: <explanation>" before committing.',
+    ).toMatch(/Golden-Update:\s+\S+/);
+    return { status: 'dirty-ok', message: 'Validated pre-commit Golden-Update reason.' };
+  }
+
+  const logRes = await execa(
+    'git',
+    ['--no-optional-locks', 'log', '-n', '1', '--format=%B', '--', 'corpus/golden-counts.json'],
+    { cwd: repoRoot, encoding: 'utf8', windowsHide: true },
+  );
+
+  if (/Golden-Update:\s+\S+/.test(logRes.stdout)) {
+    return { status: 'clean-ok', message: 'Verified Golden-Update commit message in git history.' };
+  }
+
+  const shallowRes = await execa(
+    'git',
+    ['--no-optional-locks', 'rev-parse', '--is-shallow-repository'],
+    { cwd: repoRoot, encoding: 'utf8', windowsHide: true },
+  ).catch(() => ({ stdout: 'false' }));
+  const hasShallowFile = await fs
+    .access(path.join(repoRoot, '.git', 'shallow'))
+    .then(() => true)
+    .catch(() => false);
+  const isShallow = shallowRes.stdout.trim() === 'true' || hasShallowFile;
+
+  if (isShallow) {
+    // Only enforce when the shallow window itself contains a commit diff touching corpus/golden-counts.json.
+    let modifiedWithinShallowWindow = false;
+    const parentRes = await execa('git', ['--no-optional-locks', 'rev-parse', '--verify', 'HEAD~1'], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      windowsHide: true,
+    }).catch(() => null);
+    if (parentRes && parentRes.exitCode === 0) {
+      const diffRes = await execa(
+        'git',
+        ['--no-optional-locks', 'diff', '--name-only', 'HEAD~1', 'HEAD', '--', 'corpus/golden-counts.json'],
+        { cwd: repoRoot, encoding: 'utf8', windowsHide: true },
+      ).catch(() => null);
+      if (diffRes && diffRes.stdout.trim().length > 0) {
+        modifiedWithinShallowWindow = true;
+      }
     }
 
-    const logRes = await execa(
-      'git',
-      ['--no-optional-locks', 'log', '-n', '1', '--format=%B', '--', 'corpus/golden-counts.json'],
-      { cwd: REPO_ROOT, encoding: 'utf8', windowsHide: true },
-    );
-    expect(
-      logRes.stdout,
-      'Latest commit modifying corpus/golden-counts.json must include "Golden-Update: <explanation>" in the commit message.',
-    ).toMatch(/Golden-Update:\s+\S+/);
+    if (!modifiedWithinShallowWindow) {
+      return {
+        status: 'skipped',
+        message:
+          'Skipping Golden-Update commit-message guard: shallow clone without full commit history for corpus/golden-counts.json (set fetch-depth: 0 to verify).',
+      };
+    }
+  }
+
+  expect(
+    logRes.stdout,
+    'Latest commit modifying corpus/golden-counts.json must include "Golden-Update: <explanation>" in the commit message.',
+  ).toMatch(/Golden-Update:\s+\S+/);
+  return { status: 'clean-ok', message: 'Verified Golden-Update commit message in git history.' };
+}
+
+  it('requires a Golden-Update commit-message explanation whenever corpus/golden-counts.json changes', async () => {
+    const result = await verifyGoldenUpdateGuard(REPO_ROOT);
+    if (result.status === 'skipped') {
+      console.info(result.message);
+    }
+    expect(['clean-ok', 'dirty-ok', 'skipped']).toContain(result.status);
+  });
+
+  it('skips Golden-Update commit-message guard with a clear message on a simulated shallow clone (depth 1)', async () => {
+    const repoDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ngm-golden-shallow-'));
+    tempDirs.push(repoDir);
+
+    const gitEnv = {
+      GIT_AUTHOR_NAME: 'Test',
+      GIT_AUTHOR_EMAIL: 'test@example.com',
+      GIT_COMMITTER_NAME: 'Test',
+      GIT_COMMITTER_EMAIL: 'test@example.com',
+    };
+
+    await execa('git', ['init'], { cwd: repoDir, windowsHide: true });
+    await fs.mkdir(path.join(repoDir, 'corpus'), { recursive: true });
+    await fs.writeFile(path.join(repoDir, 'corpus', 'golden-counts.json'), '{"steps":[]}\n', 'utf8');
+    await execa('git', ['add', '.'], { cwd: repoDir, windowsHide: true });
+    await execa('git', ['commit', '-m', 'Golden-Update: initial baseline'], {
+      cwd: repoDir,
+      env: gitEnv,
+      windowsHide: true,
+    });
+
+    // Subsequent unrelated commit, then graft HEAD via .git/shallow (depth-1 shallow checkout state)
+    await fs.writeFile(path.join(repoDir, 'README.md'), 'docs update\n', 'utf8');
+    await execa('git', ['add', '.'], { cwd: repoDir, windowsHide: true });
+    await execa('git', ['commit', '-m', 'docs: update readme'], {
+      cwd: repoDir,
+      env: gitEnv,
+      windowsHide: true,
+    });
+
+    const headSha = (
+      await execa('git', ['--no-optional-locks', 'rev-parse', 'HEAD'], {
+        cwd: repoDir,
+        encoding: 'utf8',
+        windowsHide: true,
+      })
+    ).stdout.trim();
+    await fs.writeFile(path.join(repoDir, '.git', 'shallow'), `${headSha}\n`, 'utf8');
+
+    const isShallow = (
+      await execa('git', ['--no-optional-locks', 'rev-parse', '--is-shallow-repository'], {
+        cwd: repoDir,
+        encoding: 'utf8',
+        windowsHide: true,
+      })
+    ).stdout.trim();
+    expect(isShallow).toBe('true');
+
+    const result = await verifyGoldenUpdateGuard(repoDir);
+    expect(result.status).toBe('skipped');
+    expect(result.message).toContain('Skipping Golden-Update commit-message guard: shallow clone');
+    expect(result.message).toContain('fetch-depth: 0');
   });
 });

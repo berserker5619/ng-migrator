@@ -4,8 +4,12 @@ import { NgmError } from '../errors.js';
 import type { Plan, PlannedStep, ProjectInfo, ResolutionCheck } from '../model.js';
 import { loadRules } from '../recommend/rules.js';
 import type { RegistryClient } from '../registry/client.js';
-import { resolveStepDependencies } from '../resolver/resolve.js';
-import { enrichBlockersWithResolutionCheck, verifyWithPackageManager } from '../resolver/verify.js';
+import { createRegistryProgressReporter, resolveStepDependencies } from '../resolver/resolve.js';
+import {
+  enrichBlockersWithResolutionCheck,
+  resolveFixablePeerConflicts,
+  verifyWithPackageManager,
+} from '../resolver/verify.js';
 import { getStepRequirements } from './metadata.js';
 
 export interface PlanOptions {
@@ -15,12 +19,13 @@ export interface PlanOptions {
   config: ResolvedConfig;
   verifyResolution?: boolean;
   onNotice?: (message: string) => void;
+  onProgress?: (message: string) => void;
   now?: number;
   clock?: () => Date;
 }
 
 export async function createPlan(options: PlanOptions): Promise<Plan> {
-  const { project, targetMajor, registry, config, verifyResolution = true, onNotice, now, clock } = options;
+  const { project, targetMajor, registry, config, verifyResolution = true, onNotice, onProgress, now, clock } = options;
 
   const currentVersion = project.angular.version;
   const currentMajor = project.angular.major;
@@ -65,6 +70,10 @@ export async function createPlan(options: PlanOptions): Promise<Plan> {
       }
     }
 
+    if (!isFirstStep) {
+      onProgress?.(`Resolving step ${i + 1}: Angular ${fromMajor} -> ${toMajor}`);
+    }
+
     const stepResolution = await resolveStepDependencies({
       project,
       requirements,
@@ -77,10 +86,12 @@ export async function createPlan(options: PlanOptions): Promise<Plan> {
       unmaintainedThresholdMonths: config.unmaintainedThresholdMonths,
       now,
       clock,
+      ...(isFirstStep && onProgress ? { onProgress: createRegistryProgressReporter(onProgress) } : {}),
     });
 
     let resolutionCheck: ResolutionCheck = { status: 'skipped', packageManager: config.packageManager };
     if (verifyResolution && isFirstStep) {
+      onProgress?.(`Checking resolution with ${config.packageManager} (this can take a minute)`);
       resolutionCheck = await verifyWithPackageManager({
         projectRoot: project.root,
         packageManager: config.packageManager,
@@ -89,6 +100,21 @@ export async function createPlan(options: PlanOptions): Promise<Plan> {
         ...(onNotice ? { onNotice } : {}),
       });
     }
+
+    const fixableResolution = await resolveFixablePeerConflicts({
+      project,
+      registry,
+      packageManager: config.packageManager,
+      changes: stepResolution.changes,
+      resolutionCheck,
+      timeoutMs: config.resolutionTimeoutMs,
+      pinned: config.pinned,
+      neverTouch: config.neverTouch,
+      ...(onProgress ? { onNotice: onProgress } : onNotice ? { onNotice } : {}),
+    });
+    stepResolution.changes = fixableResolution.changes;
+    resolutionCheck = fixableResolution.resolutionCheck;
+    stepResolution.notes.push(...fixableResolution.companionNotes);
 
     enrichBlockersWithResolutionCheck(
       stepResolution.blockers,
@@ -138,6 +164,9 @@ export async function createPlan(options: PlanOptions): Promise<Plan> {
       if (b.riskNote) {
         risks.push(b.riskNote);
       }
+    }
+    for (const r of fixableResolution.companionRisks) {
+      risks.push(r);
     }
     for (const d of dependsOnDecisions) {
       risks.push(`${d.package}: depends on the decision at step ${d.stepIndex}.`);

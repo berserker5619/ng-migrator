@@ -415,5 +415,83 @@ describe('cli', () => {
       await cleanup();
     }
   });
+
+  it('prints per-phase progress lines and total elapsed time on stderr safely for --ascii and non-TTY', async () => {
+    const { dir, cleanup } = await tempProject({
+      'package.json': JSON.stringify({
+        name: 'progress-timing-app',
+        dependencies: {
+          '@angular/core': '^13.3.1',
+          '@angular/common': '^13.3.1',
+        },
+      }),
+      'package-lock.json': JSON.stringify({
+        name: 'progress-timing-app',
+        lockfileVersion: 3,
+        packages: {
+          '': { dependencies: { '@angular/core': '^13.3.1', '@angular/common': '^13.3.1' } },
+          'node_modules/@angular/core': { version: '13.3.1' },
+          'node_modules/@angular/common': { version: '13.3.1' },
+        },
+      }),
+    });
+    try {
+      await writeCacheEntry(dir, '@angular/core', {
+        name: '@angular/core',
+        distTags: { latest: '14.3.0' },
+        versions: {
+          '13.3.1': { version: '13.3.1' },
+          '14.3.0': { version: '14.3.0' },
+        },
+      });
+      await writeCacheEntry(dir, '@angular/common', {
+        name: '@angular/common',
+        distTags: { latest: '14.3.0' },
+        versions: {
+          '13.3.1': { version: '13.3.1' },
+          '14.3.0': { version: '14.3.0', peerDependencies: { '@angular/core': '^14.3.0' } },
+        },
+      });
+      await writeCacheEntry(dir, '@angular/compiler-cli', {
+        name: '@angular/compiler-cli',
+        distTags: { latest: '14.3.0' },
+        versions: {
+          '14.3.0': { version: '14.3.0', peerDependencies: { typescript: '>=4.6.4 <4.9.0' } },
+        },
+      });
+      await writeCacheEntry(dir, '@angular/cli', {
+        name: '@angular/cli',
+        distTags: { latest: '14.2.13' },
+        versions: {
+          '14.2.13': { version: '14.2.13' },
+        },
+      });
+
+      // doctor (--ascii + non-TTY)
+      const doctorIo = io({ cwd: dir, isTTY: false });
+      expect(await runCli(['--ascii', 'doctor'], doctorIo.value)).toBe(ExitCode.Success);
+      expect(doctorIo.err()).toContain('[i] Total elapsed time:');
+      expect(doctorIo.out()).not.toContain('Total elapsed time:');
+      expect(doctorIo.err()).not.toContain('\u001b[');
+
+      // analyze --offline (--ascii + non-TTY)
+      const analyzeIo = io({ cwd: dir, isTTY: false });
+      expect(await runCli(['--ascii', 'analyze', '--offline'], analyzeIo.value)).toBe(ExitCode.Success);
+      expect(analyzeIo.err()).toContain('[i] Fetching registry metadata 2/2');
+      expect(analyzeIo.err()).toContain('[i] Total elapsed time:');
+      expect(analyzeIo.out()).not.toContain('Fetching registry metadata');
+      expect(analyzeIo.err()).not.toContain('\u001b[');
+
+      // plan --offline (--ascii + non-TTY)
+      const planIo = io({ cwd: dir, isTTY: false });
+      expect(await runCli(['--ascii', 'plan', '--to', '14', '--offline'], planIo.value)).toBe(ExitCode.Success);
+      expect(planIo.err()).toContain('[i] Fetching registry metadata 2/2');
+      expect(planIo.err()).toContain('[i] Total elapsed time:');
+      expect(planIo.out()).not.toContain('Fetching registry metadata');
+      expect(planIo.err()).not.toContain('\u001b[');
+    } finally {
+      await cleanup();
+    }
+  });
 });
 

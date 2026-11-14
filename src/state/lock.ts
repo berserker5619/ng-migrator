@@ -13,6 +13,7 @@ export interface LockInfo {
   hostname: string;
   command: string;
   startedAt: string;
+  processStartedAtMs?: number;
 }
 
 export function lockPath(root: string): string {
@@ -36,34 +37,97 @@ export interface Lock {
 
 /**
  * Take the per-project lock so two runs never touch the same project.
- * A stale lock (dead process on this host) is reported, not silently removed.
+ * Automatically recovers a lock whose owning process is verifiably dead on this host
+ * (matching hostname, valid start time, PID not running or pre-boot). Refuses when held by
+ * a live process or when the owner cannot be determined.
  */
-export async function acquireLock(root: string, command: string, now: Date = new Date()): Promise<Lock> {
+export async function acquireLock(
+  root: string,
+  command: string,
+  now: Date = new Date(),
+  onNotice?: (message: string) => void,
+): Promise<Lock> {
   const file = lockPath(root);
   await mkdir(path.dirname(file), { recursive: true });
-  const info: LockInfo = { pid: process.pid, hostname: os.hostname(), command, startedAt: now.toISOString() };
+  const info: LockInfo = {
+    pid: process.pid,
+    hostname: os.hostname(),
+    command,
+    startedAt: now.toISOString(),
+    processStartedAtMs: now.getTime() - Math.floor(process.uptime() * 1000),
+  };
+
+  const where = `${STATE_DIR}/${LOCK_FILE}`;
+  const manualHint = `Make sure no ng-migrator is running, then delete ${where}.`;
 
   try {
     await writeFile(file, `${JSON.stringify(info, null, 2)}\n`, { flag: 'wx' });
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
-    let held: Partial<LockInfo> = {};
+    let held: Partial<LockInfo> | undefined;
     try {
       held = JSON.parse(await readFile(file, 'utf8')) as LockInfo;
     } catch {
-      // Unreadable lock: treat as held by an unknown process.
+      held = undefined;
     }
-    const where = `${STATE_DIR}/${LOCK_FILE}`;
-    const sameHost = held.hostname === os.hostname();
-    if (sameHost && typeof held.pid === 'number' && !isProcessAlive(held.pid)) {
-      throw new NgmError('NGM-3003', `A previous run ("${held.command ?? 'unknown'}", pid ${held.pid}) ended without releasing ${where}.`, {
-        hint: `Make sure no ng-migrator is running, then delete ${where}.`,
+
+    if (
+      !held ||
+      typeof held.hostname !== 'string' ||
+      held.hostname.length === 0 ||
+      typeof held.pid !== 'number' ||
+      !Number.isInteger(held.pid) ||
+      held.pid <= 0 ||
+      typeof held.startedAt !== 'string' ||
+      Number.isNaN(Date.parse(held.startedAt))
+    ) {
+      throw new NgmError('NGM-3003', `Existing lock ${where} has unreadable or incomplete owner metadata.`, {
+        hint: manualHint,
       });
     }
-    throw new NgmError(
-      'NGM-3002',
-      `Another ng-migrator run ("${held.command ?? 'unknown'}", pid ${held.pid ?? '?'} on ${held.hostname ?? 'unknown host'}) is using this project.`,
-      { hint: `Wait for it to finish. If it is not running, delete ${where}.` },
+
+    const ownerPid = held.pid;
+    const ownerHost = held.hostname;
+    const ownerCommand = held.command ?? 'unknown';
+    const ownerStartedAt = held.startedAt;
+
+    if (ownerHost !== os.hostname()) {
+      throw new NgmError(
+        'NGM-3003',
+        `Another ng-migrator run ("${ownerCommand}", pid ${ownerPid} on host ${ownerHost}) holds ${where}, and its status cannot be verified from this host (${os.hostname()}).`,
+        { hint: manualHint },
+      );
+    }
+
+    const bootTimeMs = Date.now() - os.uptime() * 1000;
+    const preBootProcess =
+      typeof held.processStartedAtMs === 'number' && held.processStartedAtMs < bootTimeMs - 60_000;
+    const ownerAlive = isProcessAlive(ownerPid) && !preBootProcess;
+
+    if (ownerAlive) {
+      throw new NgmError(
+        'NGM-3002',
+        `Another ng-migrator run ("${ownerCommand}", pid ${ownerPid} on ${ownerHost}) is using this project.`,
+        { hint: `Wait for it to finish. ${manualHint}` },
+      );
+    }
+
+    // Verifiably dead on the same host: auto-recover the stale lock atomically.
+    await removeWithRetry(file);
+    try {
+      await writeFile(file, `${JSON.stringify(info, null, 2)}\n`, { flag: 'wx' });
+    } catch (retryErr) {
+      if ((retryErr as NodeJS.ErrnoException).code === 'EEXIST') {
+        throw new NgmError(
+          'NGM-3002',
+          `Another ng-migrator run acquired ${where} while stale lock recovery was in progress.`,
+          { hint: `Wait for it to finish. ${manualHint}` },
+        );
+      }
+      throw retryErr;
+    }
+    onNotice?.(
+      `Recovered stale lock ${where} from dead process (pid ${ownerPid}, host ${ownerHost}, command "${ownerCommand}", started ${ownerStartedAt}).`,
     );
   }
 
@@ -102,8 +166,13 @@ export async function acquireLock(root: string, command: string, now: Date = new
 }
 
 /** Run `fn` while holding the project lock. */
-export async function withLock<T>(root: string, command: string, fn: () => Promise<T>): Promise<T> {
-  const lock = await acquireLock(root, command);
+export async function withLock<T>(
+  root: string,
+  command: string,
+  fn: () => Promise<T>,
+  onNotice?: (message: string) => void,
+): Promise<T> {
+  const lock = await acquireLock(root, command, new Date(), onNotice);
   try {
     return await fn();
   } finally {

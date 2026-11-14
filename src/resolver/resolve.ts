@@ -31,6 +31,32 @@ export interface ResolveStepOptions {
   unmaintainedThresholdMonths?: number;
   now?: number;
   clock?: () => Date;
+  onProgress?: (completed: number, total: number, packageName: string) => void;
+}
+
+/**
+ * Formats throttled per-package registry fetch progress lines (for example "Fetching registry metadata 34/83").
+ */
+export function createRegistryProgressReporter(
+  onProgress: ((message: string) => void) | undefined,
+): ((completed: number, total: number, packageName: string) => void) | undefined {
+  if (!onProgress) return undefined;
+  let lastEmitMs = 0;
+  let lastEmittedCompleted = 0;
+  return (completed: number, total: number) => {
+    if (total <= 0) return;
+    const now = Date.now();
+    const shouldEmit =
+      completed === total ||
+      (completed === 1 && lastEmittedCompleted === 0) ||
+      completed % 10 === 0 ||
+      now - lastEmitMs >= 250;
+    if (shouldEmit && completed > lastEmittedCompleted) {
+      lastEmittedCompleted = completed;
+      lastEmitMs = now;
+      onProgress(`Fetching registry metadata ${completed}/${total}`);
+    }
+  };
 }
 
 export interface StepResolution {
@@ -294,10 +320,32 @@ export function evaluateUnknownSignals(
     const d = new Date(ds);
     return Number.isNaN(d.getTime()) ? undefined : d;
   };
-
-  // Date rule for unknown evidence: a release is a candidate only if published on or before Angular n+1 release date.
-  const hasPublishDates = candidatesWithoutDirectPeer.some((v) => getReleaseDate(v) !== undefined);
   const endCutoff = angularTimeWindow.end;
+
+  // Signal (b): version numbers that follow the Angular major
+  // Evaluated before the date cutoff so the newest release of the aligned major line
+  // (e.g. ngx-echarts 16.2.0) is accepted even when published after Angular n+1's release date.
+  const majorMatches = candidatesWithoutDirectPeer.filter((v) => {
+    if (semver.prerelease(v) !== null) return false;
+    return semver.major(v) === targetMajor;
+  });
+  if (majorMatches.length > 0) {
+    const chosen = majorMatches[0]!;
+    const relDate = getReleaseDate(chosen);
+    let dateNote = '';
+    if (relDate && endCutoff) {
+      const cmp = relDate.getTime() <= endCutoff.getTime() ? '<=' : '>';
+      dateNote = ` (published ${relDate.toISOString().slice(0, 10)} ${cmp} Angular ${targetMajor + 1} release ${endCutoff.toISOString().slice(0, 10)})`;
+    }
+    return {
+      version: chosen,
+      signal: 'major-match',
+      explanation: `No @angular/* peer range declared; package major version ${targetMajor} aligns with Angular ${targetMajor}${dateNote}.`,
+    };
+  }
+
+  // Signal (c) / date cutoff for unknown evidence: a release is a candidate only if published on or before Angular n+1 release date.
+  const hasPublishDates = candidatesWithoutDirectPeer.some((v) => getReleaseDate(v) !== undefined);
   let eligibleCandidates = candidatesWithoutDirectPeer;
 
   if (hasPublishDates && endCutoff) {
@@ -319,25 +367,6 @@ export function evaluateUnknownSignals(
       };
     }
     eligibleCandidates = byDate;
-  }
-
-  // Signal (b): version numbers that follow the Angular major
-  const majorMatches = eligibleCandidates.filter((v) => {
-    if (semver.prerelease(v) !== null) return false;
-    return semver.major(v) === targetMajor;
-  });
-  if (majorMatches.length > 0) {
-    const chosen = majorMatches[0]!;
-    const relDate = getReleaseDate(chosen);
-    const dateNote =
-      relDate && endCutoff
-        ? ` (published ${relDate.toISOString().slice(0, 10)} <= Angular ${targetMajor + 1} release ${endCutoff.toISOString().slice(0, 10)})`
-        : '';
-    return {
-      version: chosen,
-      signal: 'major-match',
-      explanation: `No @angular/* peer range declared; package major version ${targetMajor} aligns with Angular ${targetMajor}${dateNote}.`,
-    };
   }
 
   // Signal (c): publish date falling on or before the release date of Angular n+1
@@ -432,14 +461,16 @@ export async function resolveStepDependencies(options: ResolveStepOptions): Prom
   // Pre-scan dependencies in parallel (bounded by RegistryClient's concurrency limit)
   // to identify Angular-aligned primary siblings declaring @angular/core or @angular/common.
   const angularAlignedSiblings = new Set<string>();
+  const totalDeps = project.dependencies.length;
+  let completedDeps = 0;
   await Promise.all(
     project.dependencies.map(async (d) => {
-      if (d.name.startsWith('@angular/') || d.name.startsWith('@angular-devkit/')) {
-        angularAlignedSiblings.add(d.name);
-        return;
-      }
-      if (CORE_UTILITY_PACKAGES.has(d.name)) return;
       try {
+        if (d.name.startsWith('@angular/') || d.name.startsWith('@angular-devkit/')) {
+          angularAlignedSiblings.add(d.name);
+          return;
+        }
+        if (CORE_UTILITY_PACKAGES.has(d.name)) return;
         const p = await registry.packument(d.name);
         if (!p?.versions) return;
         const vers = allVersionsDesc(p);
@@ -454,6 +485,9 @@ export async function resolveStepDependencies(options: ResolveStepOptions): Prom
         }
       } catch {
         // Ignore packument lookup failures during pre-scan; main loop handles reporting.
+      } finally {
+        completedDeps += 1;
+        options.onProgress?.(completedDeps, totalDeps, d.name);
       }
     }),
   );

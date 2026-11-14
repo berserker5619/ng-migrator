@@ -2,10 +2,13 @@ import { rmSync } from 'node:fs';
 import { copyFile, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import semver from 'semver';
 import type { PackageManager } from '../config/config.js';
-import type { Blocker, PackageChange, PeerConflict, ProjectInfo, ResolutionCheck } from '../model.js';
+import type { Blocker, PackageChange, PeerConflict, ProjectInfo, ResolutionCheck, StepNote } from '../model.js';
 import { pathExists, readJsonIfExists, removeWithRetry } from '../platform/fs.js';
 import { run } from '../platform/process.js';
+import { type RegistryClient, stableVersionsDesc } from '../registry/client.js';
+import { normalizeRange, preserveRangeStyle, safeMinVersion } from './range.js';
 
 export const DEFAULT_RESOLUTION_TIMEOUT_MS = 300_000;
 
@@ -541,6 +544,233 @@ export async function verifyWithPackageManager(
   }
 }
 
+export interface ResolveFixableConflictsOptions {
+  project: ProjectInfo;
+  registry: RegistryClient;
+  packageManager: PackageManager;
+  changes: PackageChange[];
+  resolutionCheck: ResolutionCheck;
+  timeoutMs?: number;
+  pinned?: Record<string, string>;
+  neverTouch?: readonly string[];
+  onNotice?: (message: string) => void;
+  verifyFn?: (options: VerifyResolutionOptions) => Promise<ResolutionCheck>;
+}
+
+export interface FixableConflictResolution {
+  changes: PackageChange[];
+  resolutionCheck: ResolutionCheck;
+  companionNotes: StepNote[];
+  companionRisks: string[];
+}
+
+function stripPackageVersion(spec: string): string {
+  return spec.replace(/@[^@]+$/, '');
+}
+
+function extractFoundVersion(found: string | undefined, pkgName: string): string | undefined {
+  if (!found) return undefined;
+  const prefix = `${pkgName}@`;
+  if (!found.startsWith(prefix)) return undefined;
+  const ver = found.slice(prefix.length);
+  return semver.valid(ver) ?? undefined;
+}
+
+/**
+ * Checks whether package-manager peer conflicts can be resolved by also upgrading a conflicting
+ * direct dependency (for example upgrading `echarts` from 4.x to 5.x when `ngx-echarts` requires
+ * `echarts >=5.0.0`). Re-runs the package-manager check with the proposed companion upgrades before
+ * accepting them, leaving a hard blocker only if the conflict remains.
+ */
+export async function resolveFixablePeerConflicts(
+  options: ResolveFixableConflictsOptions,
+): Promise<FixableConflictResolution> {
+  const {
+    project,
+    registry,
+    packageManager,
+    changes,
+    resolutionCheck,
+    timeoutMs,
+    pinned,
+    neverTouch,
+    onNotice,
+    verifyFn = verifyWithPackageManager,
+  } = options;
+
+  if (resolutionCheck.status !== 'conflict' || !resolutionCheck.conflicts?.length) {
+    return { changes, resolutionCheck, companionNotes: [], companionRisks: [] };
+  }
+
+  const conflictsByPeer = new Map<
+    string,
+    { dep: ProjectInfo['dependencies'][number]; ranges: Set<string>; requiredBy: Set<string>; foundVersion?: string }
+  >();
+
+  for (const conflict of resolutionCheck.conflicts) {
+    const directDep = project.dependencies.find((d) => d.name === conflict.peer);
+    if (!directDep) continue;
+    if (directDep.name.startsWith('@angular/') || directDep.name.startsWith('@angular-devkit/')) continue;
+    if (neverTouch?.includes(directDep.name) || pinned?.[directDep.name]) continue;
+
+    let entry = conflictsByPeer.get(directDep.name);
+    if (!entry) {
+      entry = { dep: directDep, ranges: new Set(), requiredBy: new Set() };
+      conflictsByPeer.set(directDep.name, entry);
+    }
+    entry.ranges.add(conflict.range);
+    entry.requiredBy.add(conflict.requiredBy);
+    if (!entry.foundVersion) {
+      const fv = extractFoundVersion(conflict.found, directDep.name);
+      if (fv) entry.foundVersion = fv;
+    }
+  }
+
+  if (conflictsByPeer.size === 0) {
+    return { changes, resolutionCheck, companionNotes: [], companionRisks: [] };
+  }
+
+  interface CompanionProposal {
+    change: PackageChange;
+    note: StepNote;
+    risk: string;
+  }
+
+  const proposals: CompanionProposal[] = [];
+
+  for (const [peerName, entry] of conflictsByPeer) {
+    const normalizedRanges = [...entry.ranges].map((r) => normalizeRange(r)).filter(Boolean);
+    if (normalizedRanges.length === 0) continue;
+
+    const existingChange = changes.find((c) => c.name === peerName);
+    if (
+      existingChange &&
+      normalizedRanges.every((r) => semver.satisfies(existingChange.target, r, { includePrerelease: false }))
+    ) {
+      continue;
+    }
+
+    const currentVer =
+      (entry.dep.installed && semver.valid(entry.dep.installed) ? entry.dep.installed : undefined) ??
+      safeMinVersion(entry.dep.declared)?.version ??
+      entry.foundVersion;
+
+    if (currentVer && normalizedRanges.every((r) => semver.satisfies(currentVer, r))) {
+      continue;
+    }
+
+    const pack = await registry.packument(peerName);
+    if (!pack) continue;
+
+    const candidates = stableVersionsDesc(pack).filter((v) => {
+      if (pack.versions?.[v]?.deprecated) return false;
+      if (!normalizedRanges.every((r) => semver.satisfies(v, r))) return false;
+      if (currentVer && !semver.gt(v, currentVer)) return false;
+      return true;
+    });
+
+    if (candidates.length === 0) continue;
+
+    // Pick newest release in the lowest major that satisfies the peer constraint to minimize breaking changes.
+    const minMajor = Math.min(...candidates.map((v) => semver.major(v)));
+    const chosenVersion = candidates.find((v) => semver.major(v) === minMajor) ?? candidates[0]!;
+
+    const requiredByList = [...entry.requiredBy].join(', ');
+    const fromMajor = currentVer ? semver.major(currentVer) : undefined;
+    const toMajor = semver.major(chosenVersion);
+    const riskText =
+      fromMajor !== undefined && toMajor > fromMajor
+        ? `risk: breaking changes between ${fromMajor} and ${toMajor}, check usage`
+        : 'check usage for breaking changes';
+    const message = `also upgrade ${peerName} to ${chosenVersion} (required by ${requiredByList}); ${riskText}`;
+
+    proposals.push({
+      change: {
+        name: peerName,
+        type: entry.dep.type,
+        current: currentVer ?? entry.dep.declared,
+        currentSpec: entry.dep.declared,
+        target: chosenVersion,
+        targetSpec: preserveRangeStyle(chosenVersion, entry.dep.declared),
+        reason: message,
+        evidence: 'declared-compatible',
+      },
+      note: {
+        package: peerName,
+        kind: 'companion-upgrade',
+        severity: 'note',
+        evidence: 'declared-compatible',
+        current: currentVer ?? entry.dep.declared,
+        target: chosenVersion,
+        message,
+      },
+      risk: `${peerName} (${currentVer ?? entry.dep.declared} -> ${chosenVersion}): ${message}`,
+    });
+  }
+
+  if (proposals.length === 0) {
+    return { changes, resolutionCheck, companionNotes: [], companionRisks: [] };
+  }
+
+  const proposedNames = new Set(proposals.map((p) => p.change.name));
+  const trialChanges: PackageChange[] = [
+    ...changes.filter((c) => !proposedNames.has(c.name)),
+    ...proposals.map((p) => p.change),
+  ];
+
+  onNotice?.(
+    `Re-checking package resolution with companion upgrade(s): ${proposals.map((p) => `${p.change.name}@${p.change.target}`).join(', ')}`,
+  );
+
+  const recheck = await verifyFn({
+    projectRoot: project.root,
+    packageManager,
+    changes: trialChanges,
+    ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+    ...(onNotice ? { onNotice } : {}),
+  });
+
+  if (recheck.status === 'confirmed') {
+    return {
+      changes: trialChanges,
+      resolutionCheck: recheck,
+      companionNotes: proposals.map((p) => p.note),
+      companionRisks: proposals.map((p) => p.risk),
+    };
+  }
+
+  // If the re-check still reports conflicts, retain only companions whose own peer conflict disappeared.
+  if (recheck.status === 'conflict' && recheck.conflicts && recheck.conflicts.length > 0) {
+    const surviving = proposals.filter(
+      (p) =>
+        !recheck.conflicts!.some(
+          (rc) => rc.peer === p.change.name || stripPackageVersion(rc.requiredBy) === p.change.name,
+        ),
+    );
+    if (surviving.length > 0) {
+      const survivingNames = new Set(surviving.map((p) => p.change.name));
+      const partialChanges: PackageChange[] = [
+        ...changes.filter((c) => !survivingNames.has(c.name)),
+        ...surviving.map((p) => p.change),
+      ];
+      return {
+        changes: partialChanges,
+        resolutionCheck: recheck,
+        companionNotes: surviving.map((p) => p.note),
+        companionRisks: surviving.map((p) => p.risk),
+      };
+    }
+  }
+
+  // Re-check still failed (or could not verify resolution): revert companion proposals so a hard blocker is reported.
+  return {
+    changes,
+    resolutionCheck,
+    companionNotes: [],
+    companionRisks: [],
+  };
+}
+
 /**
  * Enriches a list of blockers with peer conflict entries parsed from package manager resolution verification.
  */
@@ -563,7 +793,7 @@ export function enrichBlockersWithResolutionCheck(
   const conflicts = resolutionCheck.conflicts ?? [];
   if (conflicts.length > 0) {
     for (const conflict of conflicts) {
-      const pkgName = conflict.requiredBy.replace(/@[^@]+$/, '');
+      const pkgName = stripPackageVersion(conflict.requiredBy);
       const depInfo = project.dependencies.find((d) => d.name === pkgName);
       const dependencyKind = depInfo?.type === 'devDependencies' ? 'dev-only' : 'runtime';
       const optionsList = [

@@ -56,9 +56,9 @@ Every error reported by `ng-migrator` includes a stable identifier (`NGM-XXXX`) 
 
 ## NGM-3003: Stale lock from a run that is no longer active
 
-- **What happened:** `.ng-migrator/lock` exists on disk, but the process ID (`pid`) recorded in the lock file is no longer running on this host.
-- **Why:** A previous `ng-migrator` process was forcefully terminated (`SIGKILL` / `TerminateProcess` or power loss) before it could release `.ng-migrator/lock`.
-- **What to do next:** Confirm no `ng-migrator` process is running, then delete `.ng-migrator/lock` and re-run your command.
+- **What happened:** `.ng-migrator/lock` already exists from a previous run whose owner is either no longer active on a remote/unknown host or has unreadable/incomplete lock metadata. (When the lock records the same hostname, a valid start time, and a process ID that is verifiably no longer running on this machine, `ng-migrator` recovers the lock automatically and prints a warning.)
+- **Why:** A previous `ng-migrator` process may have ended abnormally on another host, or the lock file was corrupted so ownership cannot be verified safely.
+- **What to do next:** Make sure no `ng-migrator` process is running, then delete `.ng-migrator/lock` and re-run your command.
 
 ## NGM-3004: State file was written by a newer ng-migrator
 

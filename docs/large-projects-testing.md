@@ -297,13 +297,22 @@ Following `doctor`, `analyze`, `plan`, and `approve`, `git status --short` was e
 
 ## 7. Measured CLI Timings (`Measure-Command`)
 
-Measured on Windows with PowerShell `Measure-Command { node dist/cli.js ... | Out-Null }` against warm offline registry caches (`--offline`):
+### Offline (warm registry cache, `--offline`, skips live package-manager resolution check)
+Measured on Windows with PowerShell `Measure-Command { node dist/cli.js ... | Out-Null }` against warm offline registry caches:
 
 | Project | `doctor` | `analyze --offline` | `plan --offline` | Notes |
 |---|---|---|---|---|
 | **`angular-14-login`** | `650.094 ms` | `902.1653 ms` | `1735.277 ms` (`--to 17`, 3 steps) | Scratch copy with `node_modules` |
 | **`k8s-istio-observe-frontend`** | `504.8178 ms` | `1100.368 ms` | `1299.7315 ms` (`--to 13`, 1 step) | Lockfile mode (`node_modules` absent) |
 | **`ngx-admin`** | `745.5075 ms` | `3648.5022 ms` | `3648.934 ms` (`--to 16`, 1 step) | Scratch copy with `node_modules` (83 packages) |
+
+### Online (cold cache, live registry fetch + isolated `npm` dry-run resolution check)
+Measured on Windows on scratch copies after clearing `.ng-migrator/` (includes live registry packument fetches and live isolated `npm` resolution checks):
+
+| Project | Command | CLI Reported Elapsed | PowerShell `Measure-Command` | Notes |
+|---|---|---|---|---|
+| **`angular-14-login`** | `plan --to 17 --allow-dirty` | `24.55s` | `25095 ms` | 22 packages, 3 steps, live `npm` check |
+| **`ngx-admin`** | `plan --to 16 --allow-dirty` | `1m 25.7s` | `86371 ms` | 83 packages, 1 step, initial `npm` check + companion `echarts@5.6.0` re-check |
 
 ---
 

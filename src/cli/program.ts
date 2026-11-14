@@ -27,8 +27,12 @@ import { readProject } from '../reader/project.js';
 import { loadRules } from '../recommend/rules.js';
 import { RegistryClient, stableVersionsDesc } from '../registry/client.js';
 import { loadNpmrc } from '../registry/npmrc.js';
-import { resolveStepDependencies } from '../resolver/resolve.js';
-import { enrichBlockersWithResolutionCheck, verifyWithPackageManager } from '../resolver/verify.js';
+import { createRegistryProgressReporter, resolveStepDependencies } from '../resolver/resolve.js';
+import {
+  enrichBlockersWithResolutionCheck,
+  resolveFixablePeerConflicts,
+  verifyWithPackageManager,
+} from '../resolver/verify.js';
 import { withLock } from '../state/lock.js';
 import { readState, writeState } from '../state/state.js';
 import {
@@ -36,7 +40,7 @@ import {
   writePlanDocuments,
 } from '../steps/writer.js';
 import { NODE_RANGE, TOOL_NAME, TOOL_VERSION } from '../version.js';
-import { Output, shouldUseColor, type Writer } from './output.js';
+import { Output, formatElapsed, shouldUseColor, type Writer } from './output.js';
 
 export interface CliIo {
   stdout: Writer;
@@ -103,55 +107,60 @@ export function createProgram(
     .command('doctor')
     .description('check the machine and project before starting')
     .action(async () => {
+      const startedAt = Date.now();
       const out = getOutput();
       const projectRoot = getProjectRoot();
-      out.info('Running pre-upgrade environment and project checks...\n');
-
-      // 1. Node version
-      if (semver.satisfies(io.nodeVersion, NODE_RANGE)) {
-        out.success(`Node runtime: ${io.nodeVersion} (satisfies ${NODE_RANGE})`);
-      } else {
-        out.warn(`Node runtime: ${io.nodeVersion} (recommended: ${NODE_RANGE})`);
-      }
-
-      // 2. Git status
-      const git = await checkGitStatus(projectRoot);
-      if (!git.isGitRepo) {
-        out.info('Git repository: not detected.');
-      } else if (git.clean) {
-        out.success(`Git working tree is clean (HEAD: ${git.headCommit?.slice(0, 7) ?? 'unknown'})`);
-      } else {
-        out.warn(`Git working tree has ${git.dirtyEntries.length} uncommitted change(s).`);
-      }
-
-      // 3. Project read
       try {
-        const project = await readProject(projectRoot);
-        out.success(`Project: ${project.name ?? 'unnamed'} (Angular ${project.angular.version ?? 'unknown'})`);
-        out.success(`Package manager: ${project.packageManager.name} (${project.packageManager.source})`);
-        out.success(`Workspace structure: ${project.workspace}, style: ${project.style}`);
+        out.info('Running pre-upgrade environment and project checks...\n');
 
-        if (project.manifestLockfileDisagreement) {
-          out.warn(`⚠ Warning: Manifest vs lockfile disagreement: ${project.manifestLockfileDisagreement.reason}`);
+        // 1. Node version
+        if (semver.satisfies(io.nodeVersion, NODE_RANGE)) {
+          out.success(`Node runtime: ${io.nodeVersion} (satisfies ${NODE_RANGE})`);
+        } else {
+          out.warn(`Node runtime: ${io.nodeVersion} (recommended: ${NODE_RANGE})`);
         }
 
-        if (project.warnings.length > 0) {
-          out.info('\nProject warnings:');
-          for (const w of project.warnings) out.warn(`  - ${w}`);
+        // 2. Git status
+        const git = await checkGitStatus(projectRoot);
+        if (!git.isGitRepo) {
+          out.info('Git repository: not detected.');
+        } else if (git.clean) {
+          out.success(`Git working tree is clean (HEAD: ${git.headCommit?.slice(0, 7) ?? 'unknown'})`);
+        } else {
+          out.warn(`Git working tree has ${git.dirtyEntries.length} uncommitted change(s).`);
         }
-      } catch (err) {
-        out.error(`Project check failed: ${(err as Error).message}`);
-      }
 
-      // 4. Running dev server check (locks files on Windows)
-      const portBusy = await isPortInUse(4200);
-      if (portBusy) {
-        out.warn('Port 4200 is active: an Angular dev server (ng serve) may be running. Stop it before upgrading to prevent file lock errors.');
-      } else {
-        out.success('Port 4200: free (no running ng serve dev server detected)');
-      }
+        // 3. Project read
+        try {
+          const project = await readProject(projectRoot);
+          out.success(`Project: ${project.name ?? 'unnamed'} (Angular ${project.angular.version ?? 'unknown'})`);
+          out.success(`Package manager: ${project.packageManager.name} (${project.packageManager.source})`);
+          out.success(`Workspace structure: ${project.workspace}, style: ${project.style}`);
 
-      out.info('\nDoctor check completed.');
+          if (project.manifestLockfileDisagreement) {
+            out.warn(`⚠ Warning: Manifest vs lockfile disagreement: ${project.manifestLockfileDisagreement.reason}`);
+          }
+
+          if (project.warnings.length > 0) {
+            out.info('\nProject warnings:');
+            for (const w of project.warnings) out.warn(`  - ${w}`);
+          }
+        } catch (err) {
+          out.error(`Project check failed: ${(err as Error).message}`);
+        }
+
+        // 4. Running dev server check (locks files on Windows)
+        const portBusy = await isPortInUse(4200);
+        if (portBusy) {
+          out.warn('Port 4200 is active: an Angular dev server (ng serve) may be running. Stop it before upgrading to prevent file lock errors.');
+        } else {
+          out.success('Port 4200: free (no running ng serve dev server detected)');
+        }
+
+        out.info('\nDoctor check completed.');
+      } finally {
+        out.progress(`Total elapsed time: ${formatElapsed(Date.now() - startedAt)}`);
+      }
     });
 
   program
@@ -162,147 +171,169 @@ export function createProgram(
     .option('--report <path>', 'write the report to this path')
     .option('--offline', 'use cached registry data only')
     .action(async (opts: { to?: number; failOnBlockers?: boolean; report?: string; offline?: boolean }) => {
+      const startedAt = Date.now();
       const out = getOutput();
       const projectRoot = getProjectRoot();
-      const project = await readProject(projectRoot);
+      try {
+        const project = await readProject(projectRoot);
 
-      const currentMajor = project.angular.major;
-      if (!currentMajor) {
-        throw new NgmError('NGM-3007', 'Could not detect Angular version from project dependencies.');
-      }
+        const currentMajor = project.angular.major;
+        if (!currentMajor) {
+          throw new NgmError('NGM-3007', 'Could not detect Angular version from project dependencies.');
+        }
 
-      const { config: fileConfig } = await readConfigFile(projectRoot);
-      const config = resolveConfig({}, fileConfig, { packageManager: project.packageManager.name });
-      const npmrc = await loadNpmrc(projectRoot, io.env);
-      const registry = new RegistryClient({
-        npmrc,
-        cacheDir: path.resolve(projectRoot, config.cacheDir),
-        offline: opts.offline,
-        onWarning: (msg) => out.warn(msg),
-      });
+        const { config: fileConfig } = await readConfigFile(projectRoot);
+        const config = resolveConfig({}, fileConfig, { packageManager: project.packageManager.name });
+        const npmrc = await loadNpmrc(projectRoot, io.env);
+        const registry = new RegistryClient({
+          npmrc,
+          cacheDir: path.resolve(projectRoot, config.cacheDir),
+          offline: opts.offline,
+          onWarning: (msg) => out.warn(msg),
+        });
 
-      const corePack = await registry.packument('@angular/core');
-      const maxPublishedMajor = corePack
-        ? Math.max(...stableVersionsDesc(corePack).map((v) => semver.major(v)))
-        : 22;
+        const corePack = await registry.packument('@angular/core');
+        const maxPublishedMajor = corePack
+          ? Math.max(...stableVersionsDesc(corePack).map((v) => semver.major(v)))
+          : 22;
 
-      // When running analyze without --to on a project already at the latest Angular major,
-      // report audit status and exit 0 (plan Section 19.3).
-      if (opts.to === undefined && currentMajor >= maxPublishedMajor) {
-        out.info(`Analyzing project: ${project.name ?? path.basename(projectRoot)}`);
-        out.success(`✔ Project is already on the latest published major (${currentMajor}); nothing to upgrade.\n`);
+        // When running analyze without --to on a project already at the latest Angular major,
+        // report audit status and exit 0 (plan Section 19.3).
+        if (opts.to === undefined && currentMajor >= maxPublishedMajor) {
+          out.info(`Analyzing project: ${project.name ?? path.basename(projectRoot)}`);
+          out.success(`✔ Project is already on the latest published major (${currentMajor}); nothing to upgrade.\n`);
+
+          if (project.manifestLockfileDisagreement) {
+            out.warn(`⚠ Warning: Manifest vs lockfile disagreement: ${project.manifestLockfileDisagreement.reason}\n`);
+          }
+
+          out.info(`Dependencies analyzed: ${project.dependencies.length}`);
+          out.info(`Proposed package updates: 0 (already on latest Angular)`);
+          out.info(`Blockers detected: 0\n`);
+          out.success('No dependency blockers found.');
+          return;
+        }
 
         if (project.manifestLockfileDisagreement) {
           out.warn(`⚠ Warning: Manifest vs lockfile disagreement: ${project.manifestLockfileDisagreement.reason}\n`);
         }
 
-        out.info(`Dependencies analyzed: ${project.dependencies.length}`);
-        out.info(`Proposed package updates: 0 (already on latest Angular)`);
-        out.info(`Blockers detected: 0\n`);
-        out.success('No dependency blockers found.');
-        return;
-      }
-
-      if (project.manifestLockfileDisagreement) {
-        out.warn(`⚠ Warning: Manifest vs lockfile disagreement: ${project.manifestLockfileDisagreement.reason}\n`);
-      }
-
-      const targetMajor = opts.to ?? (currentMajor + 1);
-      if (opts.to !== undefined && opts.to <= currentMajor) {
-        throw new NgmError('NGM-2002', `--to ${opts.to} must be greater than current Angular major ${currentMajor}.`);
-      }
-      if (targetMajor > maxPublishedMajor) {
-        throw new NgmError('NGM-2002', `No published releases found for Angular major version ${targetMajor}.`);
-      }
-
-      out.info(`Analyzing project: ${project.name ?? path.basename(projectRoot)}`);
-      out.info(`Current Angular: ${project.angular.version} (major ${currentMajor}) -> Target step: ${targetMajor}\n`);
-
-      const requirements = await getStepRequirements(targetMajor, registry);
-      const rules = await loadRules(config.rules, projectRoot);
-      const clock = getClock();
-      const resolution = await resolveStepDependencies({
-        project,
-        requirements,
-        registry,
-        pinned: config.pinned,
-        neverTouch: config.neverTouch,
-        rules,
-        alternatesAllow: config.alternates.allow,
-        alternatesDeny: config.alternates.deny,
-        unmaintainedThresholdMonths: config.unmaintainedThresholdMonths,
-        clock,
-      });
-
-      // Run package-manager verification check to catch peer conflicts identically to plan
-      let resolutionCheck: ResolutionCheck = { status: 'skipped', packageManager: config.packageManager };
-      if (!opts.offline) {
-        try {
-          resolutionCheck = await verifyWithPackageManager({
-            projectRoot,
-            packageManager: config.packageManager,
-            changes: resolution.changes,
-            timeoutMs: config.resolutionTimeoutMs,
-          });
-        } catch {
-          // Leave skipped if verification cannot run
+        const targetMajor = opts.to ?? (currentMajor + 1);
+        if (opts.to !== undefined && opts.to <= currentMajor) {
+          throw new NgmError('NGM-2002', `--to ${opts.to} must be greater than current Angular major ${currentMajor}.`);
         }
-      }
-
-      enrichBlockersWithResolutionCheck(
-        resolution.blockers,
-        resolutionCheck,
-        project,
-        targetMajor,
-        config.packageManager,
-      );
-
-      out.info(`Dependencies analyzed: ${project.dependencies.length}`);
-      out.info(`Proposed package updates: ${resolution.changes.length}`);
-      out.info(`Held back releases: ${resolution.heldBack.length}`);
-      out.info(`Blockers detected: ${resolution.blockers.length}`);
-      if (resolution.notes.length > 0) {
-        out.info(`Notes (non-blocking): ${resolution.notes.length}`);
-      }
-      out.info('');
-
-      if (resolution.blockers.length > 0) {
-        out.warn('Blockers for next major:');
-        for (const b of resolution.blockers) {
-          out.warn(`  [${b.reason}] ${b.package}: ${b.details}`);
+        if (targetMajor > maxPublishedMajor) {
+          throw new NgmError('NGM-2002', `No published releases found for Angular major version ${targetMajor}.`);
         }
-        out.info('');
-      } else {
-        out.success('No dependency blockers found for immediate next major.');
-      }
 
-      if (resolution.notes.length > 0) {
-        out.info('Notes:');
-        for (const n of resolution.notes) {
-          out.info(`  [${n.kind}] ${n.package}: ${n.message}`);
+        out.info(`Analyzing project: ${project.name ?? path.basename(projectRoot)}`);
+        out.info(`Current Angular: ${project.angular.version} (major ${currentMajor}) -> Target step: ${targetMajor}\n`);
+
+        const requirements = await getStepRequirements(targetMajor, registry);
+        const rules = await loadRules(config.rules, projectRoot);
+        const clock = getClock();
+        const resolution = await resolveStepDependencies({
+          project,
+          requirements,
+          registry,
+          pinned: config.pinned,
+          neverTouch: config.neverTouch,
+          rules,
+          alternatesAllow: config.alternates.allow,
+          alternatesDeny: config.alternates.deny,
+          unmaintainedThresholdMonths: config.unmaintainedThresholdMonths,
+          clock,
+          onProgress: createRegistryProgressReporter((msg) => out.progress(msg)),
+        });
+
+        // Run package-manager verification check to catch peer conflicts identically to plan
+        let resolutionCheck: ResolutionCheck = { status: 'skipped', packageManager: config.packageManager };
+        if (!opts.offline) {
+          try {
+            out.progress(`Checking resolution with ${config.packageManager} (this can take a minute)`);
+            resolutionCheck = await verifyWithPackageManager({
+              projectRoot,
+              packageManager: config.packageManager,
+              changes: resolution.changes,
+              timeoutMs: config.resolutionTimeoutMs,
+            });
+          } catch {
+            // Leave skipped if verification cannot run
+          }
         }
-        out.info('');
-      }
 
-      if (opts.report) {
-        const reportPath = path.resolve(projectRoot, opts.report);
-        const relReportPath = path.relative(projectRoot, reportPath).replace(/\\/g, '/') || opts.report;
-        const reportData = {
-          project: project.name,
-          currentAngular: project.angular.version,
-          targetMajor,
-          blockers: resolution.blockers,
-          notes: resolution.notes,
+        const fixable = await resolveFixablePeerConflicts({
+          project,
+          registry,
+          packageManager: config.packageManager,
           changes: resolution.changes,
-          heldBack: resolution.heldBack,
-        };
-        await writeGeneratedText(reportPath, `${JSON.stringify(reportData, null, 2)}\n`);
-        out.success(`Analysis report written to: ${relReportPath}`);
-      }
+          resolutionCheck,
+          timeoutMs: config.resolutionTimeoutMs,
+          pinned: config.pinned,
+          neverTouch: config.neverTouch,
+          onNotice: (msg) => out.progress(msg),
+        });
+        resolution.changes = fixable.changes;
+        resolutionCheck = fixable.resolutionCheck;
+        resolution.notes.push(...fixable.companionNotes);
 
-      const hardBlockers = resolution.blockers.filter((b) => b.hard);
-      if (opts.failOnBlockers && hardBlockers.length > 0) {
-        throw new NgmError('NGM-4001', `Found ${hardBlockers.length} hard blocker(s) during analysis.`);
+        enrichBlockersWithResolutionCheck(
+          resolution.blockers,
+          resolutionCheck,
+          project,
+          targetMajor,
+          config.packageManager,
+        );
+
+        out.info(`Dependencies analyzed: ${project.dependencies.length}`);
+        out.info(`Proposed package updates: ${resolution.changes.length}`);
+        out.info(`Held back releases: ${resolution.heldBack.length}`);
+        out.info(`Blockers detected: ${resolution.blockers.length}`);
+        if (resolution.notes.length > 0) {
+          out.info(`Notes (non-blocking): ${resolution.notes.length}`);
+        }
+        out.info('');
+
+        if (resolution.blockers.length > 0) {
+          out.warn('Blockers for next major:');
+          for (const b of resolution.blockers) {
+            out.warn(`  [${b.reason}] ${b.package}: ${b.details}`);
+          }
+          out.info('');
+        } else {
+          out.success('No dependency blockers found for immediate next major.');
+        }
+
+        if (resolution.notes.length > 0) {
+          out.info('Notes:');
+          for (const n of resolution.notes) {
+            out.info(`  [${n.kind}] ${n.package}: ${n.message}`);
+          }
+          out.info('');
+        }
+
+        if (opts.report) {
+          const reportPath = path.resolve(projectRoot, opts.report);
+          const relReportPath = path.relative(projectRoot, reportPath).replace(/\\/g, '/') || opts.report;
+          const reportData = {
+            project: project.name,
+            currentAngular: project.angular.version,
+            targetMajor,
+            blockers: resolution.blockers,
+            notes: resolution.notes,
+            changes: resolution.changes,
+            heldBack: resolution.heldBack,
+          };
+          await writeGeneratedText(reportPath, `${JSON.stringify(reportData, null, 2)}\n`);
+          out.success(`Analysis report written to: ${relReportPath}`);
+        }
+
+        const hardBlockers = resolution.blockers.filter((b) => b.hard);
+        if (opts.failOnBlockers && hardBlockers.length > 0) {
+          throw new NgmError('NGM-4001', `Found ${hardBlockers.length} hard blocker(s) during analysis.`);
+        }
+      } finally {
+        out.progress(`Total elapsed time: ${formatElapsed(Date.now() - startedAt)}`);
       }
     });
 
@@ -321,75 +352,81 @@ export function createProgram(
       offline?: boolean;
       allowDirty?: boolean;
     }) => {
+      const startedAt = Date.now();
       const out = getOutput();
       const projectRoot = getProjectRoot();
       const targetMajor = parseTargetMajor(opts.to);
 
-      // Check clean working tree
-      const git = await checkGitStatus(projectRoot);
-      if (git.isGitRepo && !git.clean && !opts.allowDirty) {
-        throw new NgmError(
-          'NGM-3001',
-          `Working tree has uncommitted changes (${git.dirtyEntries.length} file(s)). Commit or stash them, or pass --allow-dirty.`,
-          { hint: 'ng-migrator plans and runs safely when starting from a known commit.' },
-        );
-      }
-
-      await withLock(projectRoot, 'plan', async () => {
-        const project = await readProject(projectRoot);
-        const { config: fileConfig } = await readConfigFile(projectRoot);
-        const config = resolveConfig(
-          { packageManager: opts.packageManager, rules: opts.rules },
-          fileConfig,
-          { packageManager: project.packageManager.name },
-        );
-
-        const npmrc = await loadNpmrc(projectRoot, io.env);
-        const registry = new RegistryClient({
-          npmrc,
-          cacheDir: path.resolve(projectRoot, config.cacheDir),
-          offline: opts.offline,
-          onWarning: (msg) => out.warn(msg),
-        });
-
-        const clock = getClock();
-        if (project.manifestLockfileDisagreement) {
-          out.warn(`⚠ Warning: Manifest vs lockfile disagreement: ${project.manifestLockfileDisagreement.reason}\n`);
-        }
-        out.info(`Planning upgrade: Angular ${project.angular.version} -> ${targetMajor}...`);
-        const plan = await createPlan({
-          project,
-          targetMajor,
-          registry,
-          config,
-          verifyResolution: !opts.offline,
-          onNotice: (msg) => out.info(msg),
-          clock,
-        });
-
-        const step1Res = plan.steps[0]?.resolution;
-        if (step1Res && step1Res.tempDir) {
-          out.debug(
-            `Resolution check ran in temp dir: ${step1Res.tempDir} (copied: [${(step1Res.copiedFiles ?? []).join(', ')}], status: ${step1Res.status}, deleted afterwards: ${String(step1Res.tempDirCleaned)})`,
+      try {
+        // Check clean working tree
+        const git = await checkGitStatus(projectRoot);
+        if (git.isGitRepo && !git.clean && !opts.allowDirty) {
+          throw new NgmError(
+            'NGM-3001',
+            `Working tree has uncommitted changes (${git.dirtyEntries.length} file(s)). Commit or stash them, or pass --allow-dirty.`,
+            { hint: 'ng-migrator plans and runs safely when starting from a known commit.' },
           );
         }
 
-        await writePlanDocuments(projectRoot, plan, project.hasNodeModules, clock);
+        await withLock(projectRoot, 'plan', async () => {
+          const project = await readProject(projectRoot);
+          const { config: fileConfig } = await readConfigFile(projectRoot);
+          const config = resolveConfig(
+            { packageManager: opts.packageManager, rules: opts.rules },
+            fileConfig,
+            { packageManager: project.packageManager.name },
+          );
 
-        out.success(`\nPlan generated successfully (${plan.steps.length} step(s)):`);
-        for (const s of plan.steps) {
-          const prov = s.provisional ? ' [provisional]' : '';
-          const parts: string[] = [];
-          if (s.blockers.length > 0) parts.push(`${s.blockers.length} blocker(s)`);
-          if (s.notes && s.notes.length > 0) parts.push(`${s.notes.length} note(s)`);
-          const summarySuffix = parts.length > 0 ? ` (${parts.join(', ')})` : '';
-          out.info(`  Step ${s.index}: Angular ${s.from} -> ${s.to}${prov}${summarySuffix}`);
-        }
+          const npmrc = await loadNpmrc(projectRoot, io.env);
+          const registry = new RegistryClient({
+            npmrc,
+            cacheDir: path.resolve(projectRoot, config.cacheDir),
+            offline: opts.offline,
+            onWarning: (msg) => out.warn(msg),
+          });
 
-        out.info(`\nSummary runbook written to: .ng-migrator/summary.md`);
-        out.info(`First step review: .ng-migrator/steps/01-angular-${plan.steps[0]?.from}-to-${plan.steps[0]?.to}.md`);
-        out.info(`Run "ng-migrator approve 1" after reviewing.`);
-      });
+          const clock = getClock();
+          if (project.manifestLockfileDisagreement) {
+            out.warn(`⚠ Warning: Manifest vs lockfile disagreement: ${project.manifestLockfileDisagreement.reason}\n`);
+          }
+          out.info(`Planning upgrade: Angular ${project.angular.version} -> ${targetMajor}...`);
+          const plan = await createPlan({
+            project,
+            targetMajor,
+            registry,
+            config,
+            verifyResolution: !opts.offline,
+            onNotice: (msg) => out.info(msg),
+            onProgress: (msg) => out.progress(msg),
+            clock,
+          });
+
+          const step1Res = plan.steps[0]?.resolution;
+          if (step1Res && step1Res.tempDir) {
+            out.debug(
+              `Resolution check ran in temp dir: ${step1Res.tempDir} (copied: [${(step1Res.copiedFiles ?? []).join(', ')}], status: ${step1Res.status}, deleted afterwards: ${String(step1Res.tempDirCleaned)})`,
+            );
+          }
+
+          await writePlanDocuments(projectRoot, plan, project.hasNodeModules, clock);
+
+          out.success(`\nPlan generated successfully (${plan.steps.length} step(s)):`);
+          for (const s of plan.steps) {
+            const prov = s.provisional ? ' [provisional]' : '';
+            const parts: string[] = [];
+            if (s.blockers.length > 0) parts.push(`${s.blockers.length} blocker(s)`);
+            if (s.notes && s.notes.length > 0) parts.push(`${s.notes.length} note(s)`);
+            const summarySuffix = parts.length > 0 ? ` (${parts.join(', ')})` : '';
+            out.info(`  Step ${s.index}: Angular ${s.from} -> ${s.to}${prov}${summarySuffix}`);
+          }
+
+          out.info(`\nSummary runbook written to: .ng-migrator/summary.md`);
+          out.info(`First step review: .ng-migrator/steps/01-angular-${plan.steps[0]?.from}-to-${plan.steps[0]?.to}.md`);
+          out.info(`Run "ng-migrator approve 1" after reviewing.`);
+        }, (msg) => out.warn(msg));
+      } finally {
+        out.progress(`Total elapsed time: ${formatElapsed(Date.now() - startedAt)}`);
+      }
     });
 
   program
@@ -477,7 +514,7 @@ export function createProgram(
 
         out.success(`Step ${stepIndex} (Angular ${step.from} to ${step.to}) is now approved.`);
         out.info('Follow the planned actions in the step document or commit your review.');
-      });
+      }, (msg) => out.warn(msg));
     });
 
   return program;
