@@ -11,17 +11,22 @@ on:
         required: true
         type: string
       npm_tag:
-        description: 'npm dist-tag to publish to (default: next; set to latest for stable)'
+        description: 'npm dist-tag to publish or promote to (default: latest)'
         required: true
-        default: 'next'
+        default: 'latest'
         type: choice
         options:
-          - next
           - latest
+          - next
       dry_run:
         description: 'Run npm publish --dry-run instead of publishing'
         required: true
         default: true
+        type: boolean
+      promote_only:
+        description: 'Only update dist-tag for an already-published version (skip npm publish)'
+        required: false
+        default: false
         type: boolean
 
 permissions:
@@ -93,21 +98,36 @@ jobs:
         id: prep
         run: |
           PKG_VERSION="${{ steps.verify.outputs.pkg_version }}"
-          if npm view "ng-migrator@${PKG_VERSION}" version --json >/dev/null 2>&1; then
+          DIST_TAG="${{ github.event.inputs.npm_tag || 'latest' }}"
+          DRY_RUN="${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run || 'false' }}"
+          PROMOTE_ONLY="${{ github.event_name == 'workflow_dispatch' && github.event.inputs.promote_only || 'false' }}"
+          if [ "$PROMOTE_ONLY" = "true" ]; then
+            if ! npm view "ng-migrator@${PKG_VERSION}" version --json >/dev/null 2>&1; then
+              echo "::error::Version ${PKG_VERSION} is not published on npm yet; cannot promote dist-tag."
+              exit 1
+            fi
+          elif npm view "ng-migrator@${PKG_VERSION}" version --json >/dev/null 2>&1; then
             echo "::error::Version ${PKG_VERSION} is already published on npm! Bump version before releasing."
             exit 1
           fi
-          DIST_TAG="${{ github.event.inputs.npm_tag || 'next' }}"
-          DRY_RUN="${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run || 'false' }}"
           echo "publish_tag=${DIST_TAG}" >> "$GITHUB_OUTPUT"
           echo "dry_run=${DRY_RUN}" >> "$GITHUB_OUTPUT"
-          echo "Target: ng-migrator@${PKG_VERSION} | dist-tag: ${DIST_TAG} | dry_run: ${DRY_RUN}"
+          echo "promote_only=${PROMOTE_ONLY}" >> "$GITHUB_OUTPUT"
+          echo "Target: ng-migrator@${PKG_VERSION} | dist-tag: ${DIST_TAG} | dry_run: ${DRY_RUN} | promote_only: ${PROMOTE_ONLY}"
 
       - name: Publish package to npm
         run: |
-          if [ "${{ steps.prep.outputs.dry_run }}" = "true" ]; then
+          PKG_VERSION="${{ steps.verify.outputs.pkg_version }}"
+          DIST_TAG="${{ steps.prep.outputs.publish_tag }}"
+          if [ "${{ steps.prep.outputs.promote_only }}" = "true" ]; then
+            if [ "${{ steps.prep.outputs.dry_run }}" = "true" ]; then
+              echo "Dry-run: would run npm dist-tag add ng-migrator@${PKG_VERSION} ${DIST_TAG}"
+            else
+              npm dist-tag add "ng-migrator@${PKG_VERSION}" "${DIST_TAG}"
+            fi
+          elif [ "${{ steps.prep.outputs.dry_run }}" = "true" ]; then
             echo "Running npm publish --dry-run..."
-            npm publish --dry-run --provenance --access public --tag "${{ steps.prep.outputs.publish_tag }}"
+            npm publish --dry-run --provenance --access public --tag "${DIST_TAG}"
           else
-            npm publish --provenance --access public --tag "${{ steps.prep.outputs.publish_tag }}"
+            npm publish --provenance --access public --tag "${DIST_TAG}"
           fi
