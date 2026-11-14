@@ -2406,5 +2406,127 @@ describe('Manifest vs Lockfile Disagreement and View Engine Warnings', () => {
       await cleanup();
     }
   });
+
+  it('refuses companion downgrades when satisfying release is lower than installed version, tags dev-only companions, and records npm version', async () => {
+    const fixtureRaw = await readFile(
+      path.join(process.cwd(), 'test/fixtures/resolution/npm-ls-11-17-0-shapes.json'),
+      'utf8',
+    );
+    const fixture = JSON.parse(fixtureRaw) as {
+      npmVersion: string;
+      lsOutput: unknown;
+      lockfileJson: unknown;
+    };
+
+    const conflicts = parseNpmLsConflicts(fixture.lsOutput, fixture.lockfileJson);
+    expect(conflicts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ peer: 'echarts', range: '^4.0.0', requiredBy: 'ngx-legacy-charts@4.0.0', found: 'echarts@5.0.0' }),
+        expect.objectContaining({ peer: '@types/ckeditor', range: '^4.9.10', requiredBy: 'ng2-ckeditor@1.3.7' }),
+      ]),
+    );
+
+    const { dir, cleanup } = await tempProject();
+    try {
+      await writeFile(
+        path.join(dir, 'package.json'),
+        JSON.stringify({
+          name: 'companion-no-downgrade-app',
+          dependencies: { echarts: '^5.0.0', 'ngx-legacy-charts': '^4.0.0', 'ng2-ckeditor': '~1.3.7' },
+          devDependencies: { 'jasmine-core': '~3.6.0' },
+        }),
+      );
+
+      const runMock: typeof proc.run = async (cmd, args) => {
+        const joined = `${cmd} ${args.join(' ')}`;
+        if (args[0] === '--version') {
+          return { command: joined, exitCode: 0, stdout: `${fixture.npmVersion}\n`, stderr: '', timedOut: false, failed: false };
+        }
+        return {
+          command: joined,
+          exitCode: 1,
+          stdout: '',
+          stderr: 'npm error Could not resolve dependency:\nnpm error peer echarts@"^4.0.0" from ngx-legacy-charts@4.0.0\nnpm error Found: echarts@5.0.0',
+          timedOut: false,
+          failed: true,
+        };
+      };
+
+      const check = await verifyWithPackageManager({
+        projectRoot: dir,
+        packageManager: 'npm',
+        changes: [],
+        discoverConflicts: false,
+        runFn: runMock,
+      });
+      expect(check.packageManagerVersion).toBe(fixture.npmVersion);
+
+      const registry = {
+        async packument(name: string): Promise<Packument | null> {
+          if (name === 'echarts') {
+            return {
+              name: 'echarts',
+              distTags: { latest: '5.6.0' },
+              versions: { '4.9.0': { version: '4.9.0' }, '5.0.0': { version: '5.0.0' }, '5.6.0': { version: '5.6.0' } },
+              time: {},
+            };
+          }
+          if (name === 'jasmine-core') {
+            return {
+              name: 'jasmine-core',
+              distTags: { latest: '5.1.0' },
+              versions: { '3.6.0': { version: '3.6.0' }, '3.99.1': { version: '3.99.1' } },
+              time: {},
+            };
+          }
+          return null;
+        },
+      } as unknown as RegistryClient;
+
+      const project = {
+        root: dir,
+        packageManager: { name: 'npm', source: 'default' },
+        angular: { version: '16.2.12', major: 16, source: 'lockfile' },
+        dependencies: [
+          { name: 'echarts', declared: '^5.0.0', installed: '5.0.0', type: 'dependencies' },
+          { name: 'ngx-legacy-charts', declared: '^4.0.0', installed: '4.0.0', type: 'dependencies' },
+          { name: 'jasmine-core', declared: '~3.6.0', installed: '3.6.0', type: 'devDependencies' },
+        ],
+        ngccScripts: [],
+      } as unknown as ProjectInfo;
+
+      // Installed echarts is 5.0.0, satisfying release is 4.9.0 (< 5.0.0) -> must NOT propose downgrade; report blocker instead
+      const noDowngrade = await resolveFixablePeerConflicts({
+        project,
+        registry,
+        packageManager: 'npm',
+        changes: [],
+        resolutionCheck: check,
+      });
+      expect(noDowngrade.changes).toHaveLength(0);
+      expect(noDowngrade.companionNotes).toHaveLength(0);
+      const blockers: import('../src/model.js').Blocker[] = [];
+      enrichBlockersWithResolutionCheck(blockers, noDowngrade.resolutionCheck, project, 16, 'npm');
+      expect(blockers.some((b) => b.package === 'ngx-legacy-charts' && b.reason === 'peer-conflict' && b.hard)).toBe(true);
+
+      // Dev-only companion upgrade (jasmine-core 3.6.0 -> 3.99.1) gets dependencyKind: 'dev-only'
+      const devCompanion = await resolveFixablePeerConflicts({
+        project,
+        registry,
+        packageManager: 'npm',
+        changes: [],
+        resolutionCheck: {
+          status: 'conflict',
+          packageManager: 'npm',
+          packageManagerVersion: fixture.npmVersion,
+          conflicts: [{ peer: 'jasmine-core', range: '>=3.8', requiredBy: 'karma-jasmine-html-reporter@1.7.0', found: 'jasmine-core@3.6.0' }],
+        },
+        verifyFn: async () => ({ status: 'confirmed', packageManager: 'npm', packageManagerVersion: fixture.npmVersion }),
+      });
+      expect(devCompanion.companionNotes[0]?.dependencyKind).toBe('dev-only');
+    } finally {
+      await cleanup();
+    }
+  });
 });
 

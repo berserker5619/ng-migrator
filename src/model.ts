@@ -68,6 +68,7 @@ export interface StepNote {
   kind: 'verify-by-build' | 'ivy-upgrade' | 'companion-upgrade';
   severity: 'note';
   evidence: EvidenceKind;
+  dependencyKind?: 'runtime' | 'dev-only';
   message: string;
   current?: string;
   target?: string;
@@ -154,6 +155,7 @@ export interface PeerConflict {
 export interface ResolutionCheck {
   status: 'confirmed' | 'conflict' | 'skipped' | 'failed' | 'unverified';
   packageManager?: PackageManager;
+  packageManagerVersion?: string;
   yarnFlavor?: 'classic' | 'berry';
   command?: string;
   timeoutMs?: number;

@@ -129,10 +129,13 @@ export function formatStepDocument(
   }
   lines.push('');
   const rawPm = step.resolution.packageManager ?? 'npm';
-  const pmName =
+  const pmLabel =
     rawPm === 'yarn' && step.resolution.yarnFlavor
       ? `yarn (${step.resolution.yarnFlavor})`
       : rawPm;
+  const pmName = step.resolution.packageManagerVersion
+    ? `${pmLabel} ${step.resolution.packageManagerVersion}`
+    : pmLabel;
   const warningsLabel = step.resolution.withWarnings ? 'with warnings' : 'without warnings';
   if (step.resolution.status === 'confirmed') {
     const hardOwnBlockers = step.blockers.filter((b) => b.hard && b.reason !== 'peer-conflict');
@@ -253,7 +256,8 @@ export function formatStepDocument(
   if (step.notes && step.notes.length > 0) {
     lines.push('## Notes');
     for (const n of step.notes) {
-      lines.push(`- **${n.package}** (${n.kind}, ${formatEvidence(n.evidence)}): ${n.message}`);
+      const devTag = n.dependencyKind === 'dev-only' ? ', dev-only' : '';
+      lines.push(`- **${n.package}** (${n.kind}, ${formatEvidence(n.evidence)}${devTag}): ${n.message}`);
     }
     lines.push('');
   }

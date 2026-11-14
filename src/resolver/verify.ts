@@ -598,6 +598,14 @@ export async function verifyWithPackageManager(
       }
     }
 
+    const verRes = await runFn(cmd, ['--version'], {
+      cwd: tempDir,
+      timeoutMs: 10_000,
+      cancelSignal: abortController.signal,
+    }).catch(() => undefined);
+    const verMatch = verRes && verRes.exitCode === 0 ? /(\d+\.\d+\.\d+)/.exec(verRes.stdout) : null;
+    const packageManagerVersion = verMatch?.[1];
+
     const command = `${cmd} ${args.join(' ')}`;
     const result = await runFn(cmd, args, {
       cwd: tempDir,
@@ -636,6 +644,7 @@ export async function verifyWithPackageManager(
 
     const hasWarningLines = /(?:^|\n)\s*(?:npm warn|warn\b|warning\b|➤ YN\d+:)/i.test(fullOutput);
     const extraMeta = {
+      ...(packageManagerVersion ? { packageManagerVersion } : {}),
       ...(yarnFlavor ? { yarnFlavor } : {}),
       ...(downloadEstimateMessage ? { downloadEstimateMessage } : {}),
       timeoutMs,
@@ -851,9 +860,11 @@ export async function resolveFixablePeerConflicts(
         continue;
       }
 
+      const installedVer =
+        entry.dep.installed && semver.valid(entry.dep.installed) ? entry.dep.installed : undefined;
       const currentVer =
         existingChange?.target ??
-        (entry.dep.installed && semver.valid(entry.dep.installed) ? entry.dep.installed : undefined) ??
+        installedVer ??
         safeMinVersion(entry.dep.declared)?.version ??
         entry.foundVersion;
 
@@ -867,6 +878,7 @@ export async function resolveFixablePeerConflicts(
       const candidates = stableVersionsDesc(pack).filter((v) => {
         if (pack.versions?.[v]?.deprecated) return false;
         if (!normalizedRanges.every((r) => semver.satisfies(v, r))) return false;
+        if (installedVer && !semver.gt(v, installedVer)) return false;
         if (currentVer && !semver.gt(v, currentVer)) return false;
         return true;
       });
@@ -902,6 +914,7 @@ export async function resolveFixablePeerConflicts(
           kind: 'companion-upgrade',
           severity: 'note',
           evidence: 'declared-compatible',
+          dependencyKind: entry.dep.type === 'devDependencies' ? 'dev-only' : 'runtime',
           current: currentVer ?? entry.dep.declared,
           target: chosenVersion,
           message,
