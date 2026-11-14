@@ -65,7 +65,7 @@ export type EvidenceKind =
 
 export interface StepNote {
   package: string;
-  kind: 'verify-by-build' | 'ivy-upgrade' | 'companion-upgrade';
+  kind: 'verify-by-build' | 'ivy-upgrade' | 'companion-upgrade' | 'pre-existing-conflict' | 'resolved-conflict';
   severity: 'note';
   evidence: EvidenceKind;
   dependencyKind?: 'runtime' | 'dev-only';
@@ -108,6 +108,8 @@ export type BlockerReason = 'no-compatible-version' | 'deprecated' | 'unmaintain
 export interface Blocker {
   package: string;
   reason: BlockerReason;
+  /** All distinct blocker reasons grouped for this package. */
+  reasons?: BlockerReason[];
   /** Hard blockers stop the step until resolved. */
   hard: boolean;
   /** Whether the package is a runtime dependency ('dependencies') or dev-only ('devDependencies'). */
@@ -165,6 +167,8 @@ export interface ResolutionCheck {
   warnings?: string[];
   detail?: string;
   conflicts?: PeerConflict[];
+  preExistingConflicts?: PeerConflict[];
+  resolvedConflicts?: PeerConflict[];
   tempDir?: string;
   copiedFiles?: string[];
   tempDirCleaned?: boolean;

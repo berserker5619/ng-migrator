@@ -29,7 +29,9 @@ import { RegistryClient, stableVersionsDesc } from '../registry/client.js';
 import { loadNpmrc } from '../registry/npmrc.js';
 import { createRegistryProgressReporter, resolveStepDependencies } from '../resolver/resolve.js';
 import {
+  baselineNotesForResolutionCheck,
   enrichBlockersWithResolutionCheck,
+  groupBlockersByPackage,
   resolveFixablePeerConflicts,
   verifyWithPackageManager,
 } from '../resolver/verify.js';
@@ -276,6 +278,7 @@ export function createProgram(
         resolution.changes = fixable.changes;
         resolutionCheck = fixable.resolutionCheck;
         resolution.notes.push(...fixable.companionNotes);
+        resolution.notes.push(...baselineNotesForResolutionCheck(resolutionCheck));
 
         enrichBlockersWithResolutionCheck(
           resolution.blockers,
@@ -284,6 +287,7 @@ export function createProgram(
           targetMajor,
           config.packageManager,
         );
+        resolution.blockers = groupBlockersByPackage(resolution.blockers);
 
         out.info(`Dependencies analyzed: ${project.dependencies.length}`);
         out.info(`Proposed package updates: ${resolution.changes.length}`);

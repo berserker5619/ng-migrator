@@ -6,7 +6,9 @@ import { loadRules } from '../recommend/rules.js';
 import type { RegistryClient } from '../registry/client.js';
 import { createRegistryProgressReporter, resolveStepDependencies } from '../resolver/resolve.js';
 import {
+  baselineNotesForResolutionCheck,
   enrichBlockersWithResolutionCheck,
+  groupBlockersByPackage,
   resolveFixablePeerConflicts,
   verifyWithPackageManager,
 } from '../resolver/verify.js';
@@ -129,6 +131,7 @@ export async function createPlan(options: PlanOptions): Promise<Plan> {
     stepResolution.changes = fixableResolution.changes;
     resolutionCheck = fixableResolution.resolutionCheck;
     stepResolution.notes.push(...fixableResolution.companionNotes);
+    stepResolution.notes.push(...baselineNotesForResolutionCheck(resolutionCheck));
 
     enrichBlockersWithResolutionCheck(
       stepResolution.blockers,
@@ -137,6 +140,7 @@ export async function createPlan(options: PlanOptions): Promise<Plan> {
       toMajor,
       config.packageManager,
     );
+    stepResolution.blockers = groupBlockersByPackage(stepResolution.blockers);
 
     // If a package had a "remove" recommendation at an earlier step n, do not repeat it as a blocker
     // at later steps; instead record that this step depends on the decision at step n.

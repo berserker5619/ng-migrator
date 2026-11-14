@@ -12,8 +12,11 @@ import { computeRecommendation, parseDeprecatedSuccessor } from '../src/recommen
 import { normalizeRange, preserveRangeStyle, safeMinVersion, satisfiesAngularPeer } from '../src/resolver/range.js';
 import { isProposedVersionIvyEra, resolveStepDependencies } from '../src/resolver/resolve.js';
 import {
+  baselineNotesForResolutionCheck,
+  classifyBaselineVsProposedConflicts,
   detectYarnLockfileFlavor,
   enrichBlockersWithResolutionCheck,
+  groupBlockersByPackage,
   parseNpmEresolve,
   parseNpmLsConflicts,
   parsePeerConflicts,
@@ -2348,6 +2351,7 @@ describe('Manifest vs Lockfile Disagreement and View Engine Warnings', () => {
         projectRoot: dir,
         packageManager: 'npm',
         changes: [],
+        compareBaseline: false,
         runFn: runMock,
       });
       expect(initialCheck.status).toBe('conflict');
@@ -2387,7 +2391,7 @@ describe('Manifest vs Lockfile Disagreement and View Engine Warnings', () => {
         changes: [],
         resolutionCheck: initialCheck,
         maxIterations: 2,
-        verifyFn: (opts) => verifyWithPackageManager({ ...opts, runFn: runMock }),
+        verifyFn: (opts) => verifyWithPackageManager({ ...opts, compareBaseline: false, runFn: runMock }),
       });
 
       // Fixable companion upgrade (echarts -> 5.6.0) is retained, while the 2 unfixable conflicts remain
@@ -2527,6 +2531,72 @@ describe('Manifest vs Lockfile Disagreement and View Engine Warnings', () => {
     } finally {
       await cleanup();
     }
+  });
+
+  it('parses constructed npm 10.x ls --json without problems array, classifies baseline vs introduced conflicts, and groups blockers per package', async () => {
+    const constructedRaw = await readFile(
+      path.join(process.cwd(), 'test/fixtures/resolution/npm-ls-10-x-constructed.json'),
+      'utf8',
+    );
+    const constructed = JSON.parse(constructedRaw) as { lsOutput: unknown };
+    const ls10Conflicts = parseNpmLsConflicts(constructed.lsOutput);
+    expect(ls10Conflicts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ peer: '@angular/core', range: '^14.0.0', found: '@angular/core@16.2.12' }),
+        expect.objectContaining({ peer: 'jquery', range: '1.9.1 - 3', requiredBy: 'bootstrap@4.3.1' }),
+        expect.objectContaining({ peer: 'popper.js', range: '*', requiredBy: 'bootstrap@4.3.1' }),
+      ]),
+    );
+    expect(parseNpmLsConflicts(null)).toEqual([]);
+    expect(parseNpmLsConflicts({ problems: [123, 'unrecognized line'] })).toEqual([]);
+
+    const baseline = [
+      { peer: 'jquery', range: '1.9.1 - 3', requiredBy: 'bootstrap@4.3.1' },
+      { peer: 'rxjs', range: '^6.0.0', requiredBy: 'old-pkg@1.0.0', found: 'rxjs@7.0.0' },
+    ];
+    const proposed = [
+      { peer: 'jquery', range: '1.9.1 - 3', requiredBy: 'bootstrap@4.3.1' },
+      { peer: '@types/ckeditor', range: '^4.9.10', requiredBy: 'ng2-ckeditor@1.3.7' },
+    ];
+    const classified = classifyBaselineVsProposedConflicts(baseline, proposed);
+    expect(classified.introduced).toEqual([
+      { peer: '@types/ckeditor', range: '^4.9.10', requiredBy: 'ng2-ckeditor@1.3.7' },
+    ]);
+    expect(classified.preExisting).toEqual([
+      { peer: 'jquery', range: '1.9.1 - 3', requiredBy: 'bootstrap@4.3.1' },
+    ]);
+    expect(classified.resolved).toEqual([
+      { peer: 'rxjs', range: '^6.0.0', requiredBy: 'old-pkg@1.0.0', found: 'rxjs@7.0.0' },
+    ]);
+
+    const baseNotes = baselineNotesForResolutionCheck({
+      status: 'conflict',
+      preExistingConflicts: classified.preExisting,
+      resolvedConflicts: classified.resolved,
+    });
+    expect(baseNotes.find((n) => n.kind === 'pre-existing-conflict')?.message).toContain(
+      'already present at the current versions; not caused by this step',
+    );
+    expect(baseNotes.find((n) => n.kind === 'resolved-conflict')?.package).toBe('old-pkg');
+
+    const grouped = groupBlockersByPackage([
+      { package: 'codelyzer', reason: 'no-compatible-version', hard: true, details: 'No compatible release.' },
+      { package: 'codelyzer', reason: 'peer-conflict', hard: true, details: 'Peer conflict on @angular/core.' },
+      { package: 'ng2-ckeditor', reason: 'ivy-or-ngcc', hard: false, highRisk: true, details: 'Old Ivy release.' },
+      { package: 'ng2-ckeditor', reason: 'peer-conflict', hard: true, details: 'Missing @types/ckeditor.' },
+    ]);
+    expect(grouped).toHaveLength(2);
+    expect(grouped[0]).toMatchObject({
+      package: 'codelyzer',
+      reasons: ['no-compatible-version', 'peer-conflict'],
+      hard: true,
+    });
+    expect(grouped[1]).toMatchObject({
+      package: 'ng2-ckeditor',
+      reasons: ['ivy-or-ngcc', 'peer-conflict'],
+      hard: true,
+      highRisk: true,
+    });
   });
 });
 

@@ -175,12 +175,13 @@ export function formatStepDocument(
       lines.push('None detected for this step.');
     }
     for (const b of step.blockers) {
+      const reasonsLabel = (b.reasons && b.reasons.length > 0 ? b.reasons : [b.reason]).join(' + ');
       const typeLabel = b.hard
         ? ''
         : b.highRisk
-          ? ` [high-risk soft / ${b.reason}]`
+          ? ` [high-risk soft / ${reasonsLabel}]`
           : ` [soft / ${b.reason === 'deprecated' ? 'deprecated' : b.reason === 'ivy-or-ngcc' ? 'ivy-or-ngcc' : 'unmaintained'}]`;
-      lines.push(`### ${b.package} (${b.reason})${typeLabel}`);
+      lines.push(`### ${b.package} (${reasonsLabel})${typeLabel}`);
       lines.push(`- Dependency kind: ${b.dependencyKind ?? 'runtime'}`);
       if (b.hard && b.reason !== 'peer-conflict' && step.resolution.status === 'confirmed') {
         lines.push(
@@ -287,10 +288,11 @@ export function formatStepDocument(
     lines.push(`- [${checked}] Confirm ready to proceed <!-- id: ${confirmId} -->`);
   } else {
     for (const b of step.blockers) {
+      const reasonsLabel = (b.reasons && b.reasons.length > 0 ? b.reasons : [b.reason]).join(' + ');
       const stableId = generateDecisionId(b.package, 'blocker');
       const legacyId = `blocker-${b.package}`;
       const checked = (stepState?.decisions[stableId] ?? stepState?.decisions[legacyId]) ? 'x' : ' ';
-      lines.push(`- [${checked}] Decide resolution for ${b.package} (${b.reason}) <!-- id: ${stableId} -->`);
+      lines.push(`- [${checked}] Decide resolution for ${b.package} (${reasonsLabel}) <!-- id: ${stableId} -->`);
     }
   }
   if (step.dependsOnDecisions && step.dependsOnDecisions.length > 0) {

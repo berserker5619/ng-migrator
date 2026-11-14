@@ -23,6 +23,10 @@ export interface VerifyResolutionOptions {
   onTempDirReady?: (info: { tempDir: string; copiedFiles: string[] }) => void;
   /** Discover all peer conflicts on npm ERESOLVE via --legacy-peer-deps + npm ls (default: true). */
   discoverConflicts?: boolean;
+  /** Compare proposed conflicts against the current manifest/lockfile baseline (default: true for npm). */
+  compareBaseline?: boolean;
+  /** Pre-computed baseline conflicts to avoid re-running baseline discovery on re-check iterations. */
+  baselineConflicts?: readonly PeerConflict[];
   /** Injectable process runner for testing. */
   runFn?: typeof run;
 }
@@ -295,10 +299,11 @@ function packageNameFromLockPath(pkgPath: string): string {
  */
 export function parseNpmLsConflicts(lsJson: unknown, lockfileJson?: unknown): PeerConflict[] {
   if (!lsJson || typeof lsJson !== 'object') return [];
-  const obj = lsJson as { problems?: unknown };
+  const obj = lsJson as { problems?: unknown; dependencies?: unknown };
   const problems = Array.isArray(obj.problems)
     ? obj.problems.filter((p): p is string => typeof p === 'string')
     : [];
+  const matchedAnyProblem = problems.length > 0;
 
   const packages =
     lockfileJson &&
@@ -373,7 +378,131 @@ export function parseNpmLsConflicts(lsJson: unknown, lockfileJson?: unknown): Pe
     }
   }
 
+  if (!matchedAnyProblem && obj.dependencies && typeof obj.dependencies === 'object') {
+    // Fallback for older npm (e.g. 10.x) or --json outputs without a `problems` array: walk `dependencies`.
+    const visited = new Set<object>();
+    const walkDeps = (depsObj: Record<string, unknown>, parentLabel: string): void => {
+      if (visited.has(depsObj)) return;
+      visited.add(depsObj);
+      for (const [depName, rawNode] of Object.entries(depsObj)) {
+        if (!rawNode || typeof rawNode !== 'object') continue;
+        const node = rawNode as {
+          version?: unknown;
+          invalid?: unknown;
+          missing?: unknown;
+          peerMissing?: unknown;
+          required?: unknown;
+          dependencies?: unknown;
+        };
+        const verStr = typeof node.version === 'string' ? node.version : undefined;
+        const reqRange =
+          typeof node.required === 'string'
+            ? node.required
+            : node.required && typeof node.required === 'object' && typeof (node.required as { version?: unknown }).version === 'string'
+              ? (node.required as { version: string }).version
+              : '*';
+
+        if (node.missing === true || node.peerMissing === true) {
+          conflicts.push({
+            peer: depName,
+            range: reqRange,
+            requiredBy: parentLabel,
+          });
+        } else if (node.invalid === true) {
+          conflicts.push({
+            peer: depName,
+            range: reqRange,
+            requiredBy: parentLabel,
+            ...(verStr ? { found: `${depName}@${verStr}` } : {}),
+          });
+        }
+
+        if (node.dependencies && typeof node.dependencies === 'object') {
+          const nextParent = verStr ? `${depName}@${verStr}` : depName;
+          walkDeps(node.dependencies as Record<string, unknown>, nextParent);
+        }
+      }
+    };
+    const rootName = typeof (lsJson as { name?: unknown }).name === 'string' ? (lsJson as { name: string }).name : 'root';
+    const rootVer = typeof (lsJson as { version?: unknown }).version === 'string' ? (lsJson as { version: string }).version : '0.0.0';
+    walkDeps(obj.dependencies as Record<string, unknown>, `${rootName}@${rootVer}`);
+  }
+
   return dedupePeerConflicts(conflicts);
+}
+
+function conflictRelationKey(c: PeerConflict): string {
+  return `${stripPackageVersion(c.requiredBy)}\0${c.peer}\0${c.range}`;
+}
+
+/**
+ * Classifies proposed conflicts against baseline conflicts from the current manifest/lockfile.
+ * Only `introduced` conflicts become blockers; `preExisting` conflicts become informational notes.
+ */
+export function classifyBaselineVsProposedConflicts(
+  baseline: readonly PeerConflict[],
+  proposed: readonly PeerConflict[],
+): {
+  introduced: PeerConflict[];
+  preExisting: PeerConflict[];
+  resolved: PeerConflict[];
+} {
+  const baselineByKey = new Map<string, PeerConflict>();
+  for (const b of baseline) {
+    baselineByKey.set(conflictRelationKey(b), b);
+  }
+  const proposedByKey = new Map<string, PeerConflict>();
+  for (const p of proposed) {
+    proposedByKey.set(conflictRelationKey(p), p);
+  }
+
+  const introduced: PeerConflict[] = [];
+  const preExisting: PeerConflict[] = [];
+  const resolved: PeerConflict[] = [];
+
+  for (const p of proposed) {
+    if (baselineByKey.has(conflictRelationKey(p))) {
+      preExisting.push(p);
+    } else {
+      introduced.push(p);
+    }
+  }
+
+  for (const b of baseline) {
+    if (!proposedByKey.has(conflictRelationKey(b))) {
+      resolved.push(b);
+    }
+  }
+
+  return { introduced, preExisting, resolved };
+}
+
+/**
+ * Discovers peer conflicts on the project's CURRENT manifest and lockfile in an isolated temp directory.
+ */
+export async function discoverBaselineNpmPeerConflicts(
+  projectRoot: string,
+  runCmd: typeof run,
+  timeoutMs: number,
+  cancelSignal?: AbortSignal,
+): Promise<PeerConflict[]> {
+  let baseTemp: string | undefined;
+  try {
+    baseTemp = await mkdtemp(path.join(os.tmpdir(), 'ngm-baseline-'));
+    for (const file of ['package.json', 'package-lock.json', '.npmrc']) {
+      const src = path.join(projectRoot, file);
+      if (await pathExists(src)) {
+        await copyFile(src, path.join(baseTemp, file)).catch(() => undefined);
+      }
+    }
+    return await discoverAllNpmPeerConflicts(baseTemp, runCmd, timeoutMs, cancelSignal);
+  } catch {
+    return [];
+  } finally {
+    if (baseTemp) {
+      await removeWithRetry(baseTemp).catch(() => undefined);
+    }
+  }
 }
 
 /**
@@ -431,6 +560,8 @@ export async function verifyWithPackageManager(
     onNotice,
     onTempDirReady,
     discoverConflicts = true,
+    compareBaseline = true,
+    baselineConflicts,
     runFn = run,
   } = options;
 
@@ -615,6 +746,8 @@ export async function verifyWithPackageManager(
 
     const fullOutput = `${result.stdout}\n${result.stderr}`;
     let conflicts = parsePeerConflicts(fullOutput);
+    let preExistingConflicts: PeerConflict[] = [];
+    let resolvedConflicts: PeerConflict[] = [];
 
     if (
       packageManager === 'npm' &&
@@ -631,6 +764,24 @@ export async function verifyWithPackageManager(
       ).catch(() => [] as PeerConflict[]);
       if (discovered.length > 0) {
         conflicts = dedupePeerConflicts([...conflicts, ...discovered]);
+      }
+
+      if (compareBaseline && conflicts.length > 0) {
+        const baseline =
+          baselineConflicts !== undefined
+            ? [...baselineConflicts]
+            : await discoverBaselineNpmPeerConflicts(
+                projectRoot,
+                runFn,
+                timeoutMs,
+                abortController.signal,
+              ).catch(() => [] as PeerConflict[]);
+        if (baseline.length > 0) {
+          const classified = classifyBaselineVsProposedConflicts(baseline, conflicts);
+          conflicts = classified.introduced;
+          preExistingConflicts = classified.preExisting;
+          resolvedConflicts = classified.resolved;
+        }
       }
     }
 
@@ -653,7 +804,7 @@ export async function verifyWithPackageManager(
     };
 
     // Even if npm, pnpm, or yarn exits 0, peer warnings parsed from output are treated as peer-conflict blockers
-    if (conflicts.length > 0) {
+    if (conflicts.length > 0 || preExistingConflicts.length > 0) {
       return {
         status: 'conflict',
         packageManager,
@@ -661,6 +812,8 @@ export async function verifyWithPackageManager(
         withWarnings: result.exitCode === 0 || hasWarningLines,
         detail: 'Peer dependency conflict during resolution check.',
         conflicts,
+        ...(preExistingConflicts.length > 0 ? { preExistingConflicts } : {}),
+        ...(resolvedConflicts.length > 0 ? { resolvedConflicts } : {}),
         tempDir,
         copiedFiles,
         tempDirCleaned,
@@ -941,6 +1094,7 @@ export async function resolveFixablePeerConflicts(
       projectRoot: project.root,
       packageManager,
       changes: trialChanges,
+      ...(resolutionCheck.preExistingConflicts ? { baselineConflicts: resolutionCheck.preExistingConflicts } : {}),
       ...(timeoutMs !== undefined ? { timeoutMs } : {}),
       ...(onNotice ? { onNotice } : {}),
     });
@@ -1046,7 +1200,7 @@ export function enrichBlockersWithResolutionCheck(
         existing.details = `${existing.details} ${conflictDetails}`;
       }
     }
-  } else {
+  } else if ((resolutionCheck.preExistingConflicts?.length ?? 0) === 0) {
     blockers.push({
       package: 'peer-resolution',
       reason: 'peer-conflict',
@@ -1064,4 +1218,84 @@ export function enrichBlockersWithResolutionCheck(
       ],
     });
   }
+}
+
+/**
+ * Converts pre-existing and resolved peer conflicts from baseline comparison into non-blocking StepNotes.
+ */
+export function baselineNotesForResolutionCheck(resolutionCheck: ResolutionCheck): StepNote[] {
+  const notes: StepNote[] = [];
+  for (const c of resolutionCheck.preExistingConflicts ?? []) {
+    const pkg = stripPackageVersion(c.requiredBy);
+    notes.push({
+      package: pkg,
+      kind: 'pre-existing-conflict',
+      severity: 'note',
+      evidence: 'verified',
+      message: `already present at the current versions; not caused by this step (${c.requiredBy} requires peer ${c.peer}@"${c.range}"${c.found ? `, found ${c.found}` : ''}).`,
+    });
+  }
+  for (const c of resolutionCheck.resolvedConflicts ?? []) {
+    const pkg = stripPackageVersion(c.requiredBy);
+    notes.push({
+      package: pkg,
+      kind: 'resolved-conflict',
+      severity: 'note',
+      evidence: 'verified',
+      message: `pre-existing peer conflict resolved by this step (${c.requiredBy} required ${c.peer}@"${c.range}").`,
+    });
+  }
+  return notes;
+}
+
+/**
+ * Groups multiple blockers for the same package into a single blocker entry listing all distinct reasons,
+ * so blocker counts reflect unique packages.
+ */
+export function groupBlockersByPackage(blockers: readonly Blocker[]): Blocker[] {
+  const byPkg = new Map<string, Blocker>();
+  for (const b of blockers) {
+    const existing = byPkg.get(b.package);
+    if (!existing) {
+      byPkg.set(b.package, {
+        ...b,
+        reasons: b.reasons && b.reasons.length > 0 ? [...b.reasons] : [b.reason],
+        ...(b.options ? { options: [...b.options] } : {}),
+        ...(b.nextSteps ? { nextSteps: [...b.nextSteps] } : {}),
+      });
+      continue;
+    }
+
+    const reasons = existing.reasons ?? [existing.reason];
+    for (const r of b.reasons ?? [b.reason]) {
+      if (!reasons.includes(r)) reasons.push(r);
+    }
+    existing.reasons = reasons;
+    existing.hard = existing.hard || b.hard;
+    if (b.highRisk) existing.highRisk = true;
+    if (b.details && !existing.details.includes(b.details)) {
+      existing.details = `${existing.details} ${b.details}`;
+    }
+    if (!existing.chosenVersion && b.chosenVersion) existing.chosenVersion = b.chosenVersion;
+    if (!existing.chosenVersionReason && b.chosenVersionReason) existing.chosenVersionReason = b.chosenVersionReason;
+    if (!existing.lastCompatible && b.lastCompatible) existing.lastCompatible = b.lastCompatible;
+    if (!existing.newestVersion && b.newestVersion) existing.newestVersion = b.newestVersion;
+    if (!existing.unknownExplanation && b.unknownExplanation) existing.unknownExplanation = b.unknownExplanation;
+    if (!existing.usage && b.usage) existing.usage = b.usage;
+    if (b.options) {
+      const opts = existing.options ?? [];
+      for (const opt of b.options) {
+        if (!opts.includes(opt)) opts.push(opt);
+      }
+      existing.options = opts;
+    }
+    if (b.nextSteps) {
+      const steps = existing.nextSteps ?? [];
+      for (const s of b.nextSteps) {
+        if (!steps.includes(s)) steps.push(s);
+      }
+      existing.nextSteps = steps;
+    }
+  }
+  return [...byPkg.values()];
 }

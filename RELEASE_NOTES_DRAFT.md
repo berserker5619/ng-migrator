@@ -17,9 +17,10 @@
 - **Proposed-Release View Engine / `ngcc` Detection:**
   - Evaluates whether the installed package uses View Engine / `ngcc` and inspects the **proposed** target release's registry fields (`fesm2020`, `fesm2022`, `exports`, `module`, `typings`) to distinguish clean Ivy upgrades (`ivy-upgrade` note) from unmigrated View Engine blockers (`ivy-or-ngcc`) and high-risk soft blockers.
   - Explicitly notes in step documents when `node_modules` is missing and how to run the local check.
-- **Full Peer-Conflict Discovery & Companion Upgrades:**
+- **Baseline vs Introduced Peer-Conflict Discovery, Grouping & Companion Upgrades:**
   - Eliminated false `peer-conflict` parser artifacts from `npm` `ERESOLVE` `Found:` trees.
-  - On `npm` `ERESOLVE`, resolves the isolated OS temp directory with `--legacy-peer-deps` and parses `npm ls --all --package-lock-only --json` to surface all invalid and missing peer conflicts in a single pass.
+  - On `npm` `ERESOLVE`, resolves the isolated OS temp directory with `--legacy-peer-deps` and parses `npm ls --all --package-lock-only --json` against a baseline discovery on the current manifest and lockfile: only **introduced** conflicts become `peer-conflict` blockers, while **pre-existing** conflicts become non-blocking notes (`already present at the current versions; not caused by this step`) and **resolved** conflicts are noted.
+  - Groups all blocker reasons per unique package (for example `ng2-ckeditor (ivy-or-ngcc + peer-conflict)`), so blocker counts and decision checkboxes reflect unique packages.
   - Proposes raise-only companion upgrades for outdated direct dependencies (e.g. `echarts`, `jasmine-core`, `@types/node`), tags `devDependencies` companions as `dev-only`, re-checks resolution up to `maxConflictIterations` (default `3`), and attributes official lockstep (`@angular/*`, `@angular/cdk`, `@angular/material`) conflicts to either the proposed set or the third-party peer package.
   - Records the package manager version in step runbooks (e.g. `Resolution check: npm 11.17.0 ...`).
 - **Manifest vs Lockfile Disagreement Warnings & Deprecation Successors:**

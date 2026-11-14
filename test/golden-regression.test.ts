@@ -120,6 +120,8 @@ describe('Offline golden regression suite', () => {
             ) as {
               initialEresolveStderr: string;
               recheckEresolveStderr: string;
+              baselineNpmLsJson: unknown;
+              baselineLockfileJson: unknown;
               initialNpmLsJson: unknown;
               recheckNpmLsJson: unknown;
               lockfileJson: unknown;
@@ -156,19 +158,25 @@ describe('Offline golden regression suite', () => {
               };
             }
             if (cmd === 'npm' && args[0] === 'install' && args.includes('--legacy-peer-deps')) {
+              const isBaseline = opts?.cwd?.includes('ngm-baseline-');
               await fs.writeFile(
                 path.join(opts!.cwd!, 'package-lock.json'),
-                JSON.stringify(ngxAdminConflicts.lockfileJson),
+                JSON.stringify(isBaseline ? ngxAdminConflicts.baselineLockfileJson : ngxAdminConflicts.lockfileJson),
                 'utf8',
               );
               return { command: joined, exitCode: 0, stdout: '', stderr: '', timedOut: false, failed: false };
             }
             if (cmd === 'npm' && args[0] === 'ls') {
+              const isBaseline = opts?.cwd?.includes('ngm-baseline-');
               return {
                 command: joined,
                 exitCode: 1,
                 stdout: JSON.stringify(
-                  installPass === 1 ? ngxAdminConflicts.initialNpmLsJson : ngxAdminConflicts.recheckNpmLsJson,
+                  isBaseline
+                    ? ngxAdminConflicts.baselineNpmLsJson
+                    : installPass === 1
+                      ? ngxAdminConflicts.initialNpmLsJson
+                      : ngxAdminConflicts.recheckNpmLsJson,
                 ),
                 stderr: '',
                 timedOut: false,
@@ -198,7 +206,7 @@ describe('Offline golden regression suite', () => {
         noteCount: (s.notes ?? []).length,
         blockers: s.blockers.map((b) => ({
           package: b.package,
-          reason: b.reason,
+          reason: (b.reasons && b.reasons.length > 0 ? b.reasons : [b.reason]).join(' + '),
           hard: b.hard,
           highRisk: Boolean(b.highRisk),
           evidence: b.evidence ?? null,
