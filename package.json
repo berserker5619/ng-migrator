@@ -1,7 +1,7 @@
 {
   "name": "ng-migrator",
-  "version": "1.2.0",
-  "description": "Plans Angular upgrades one major version at a time (n-1 to n), with dependency blocker analysis and recommended fixes.",
+  "version": "1.2.1",
+  "description": "Plans Angular upgrades one major version at a time (n to n+1), with dependency blocker analysis and recommended fixes.",
   "keywords": [
     "angular",
     "upgrade",

@@ -1,6 +1,6 @@
 # ng-migrator
 
-> A read-only CLI that plans Angular upgrades one major version at a time (always $n-1 \to n$), classifies dependencies with three-state compatibility evidence, detects View Engine / `ngcc` risks on proposed releases, verifies peer resolution in an isolated temp directory, and writes reviewable Markdown step runbooks under `.ng-migrator/`. **It never commits or modifies project files.**
+> A read-only CLI that plans Angular upgrades one major version at a time (always $n \to n+1$), classifies dependencies with three-state compatibility evidence, detects View Engine / `ngcc` risks on proposed releases, verifies peer resolution in an isolated temp directory, and writes reviewable Markdown step runbooks under `.ng-migrator/`. **It never commits or modifies project files.**
 
 [![CI](https://github.com/berserker5619/ng-migrator/actions/workflows/ci.yml/badge.svg)](https://github.com/berserker5619/ng-migrator/actions)
 [![Node: >=22](https://img.shields.io/badge/node-%3E%3D22%20(22%20%7C%2024%20%7C%2026)-brightgreen.svg)](https://nodejs.org/)
@@ -19,7 +19,7 @@ ng-migrator doctor
 # 3. Inspect blockers for the immediate next Angular major version
 ng-migrator analyze
 
-# 4. Generate one Markdown runbook per n-1 -> n step up to your target major
+# 4. Generate one Markdown runbook per n -> n+1 step up to your target major
 ng-migrator plan --to 19
 
 # 5. Check which steps are planned or approved

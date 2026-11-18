@@ -74,7 +74,7 @@ export function parseAsOfDate(value: string): Date {
 export function parseTargetMajor(value: string): number {
   if (!/^\d+$/.test(value.trim())) {
     throw new NgmError('NGM-2002', `--to must be a single Angular major version such as 19, not "${value}".`, {
-      hint: 'ng-migrator always plans one major at a time (n-1 to n) up to the --to major.',
+      hint: 'ng-migrator always plans one major at a time (n to n+1) up to the --to major.',
     });
   }
   const major = Number(value);
@@ -91,7 +91,7 @@ export function createProgram(
   const program = new Command();
   program
     .name(TOOL_NAME)
-    .description('Plan Angular upgrades one major version at a time (n-1 to n). Never commits.')
+    .description('Plan Angular upgrades one major version at a time (n to n+1). Never commits.')
     .version(TOOL_VERSION, '-v, --version')
     .option('--project <path>', 'path to the Angular project root (default: current directory)')
     .option('--as-of <date>', 'reference ISO date for unmaintained threshold and timestamps (for example 2026-11-01)')
@@ -343,7 +343,7 @@ export function createProgram(
 
   program
     .command('plan')
-    .description('write one document per n-1 to n step; changes nothing in the project')
+    .description('write one document per n to n+1 step; changes nothing in the project')
     .requiredOption('--to <major>', 'final Angular major version, for example 19')
     .addOption(new Option('--package-manager <name>', 'override detection').choices([...PACKAGE_MANAGERS]))
     .option('--rules <path...>', 'extra rule files')

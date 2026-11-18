@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-11-18
+
+- Updated CLI help text, error hints, package description, and documentation from `n-1 to n` to `n to n+1`.
+
 ## [1.2.0] - 2026-11-14
 
 - **Three-State Evidence & Signal Precedence**: Replaced binary Angular-peer classification with `declared compatible`, `declared incompatible`, and `unknown` (non-blocking "verify by build" note; core packages such as `rxjs`, `tslib`, and `zone.js` never flagged). Evaluates unknown-evidence signals in precedence order: `(a)` sibling alignment (e.g. `@ngrx/store-devtools`, `@nebular/eva-icons`), `(b)` Angular major alignment taking the newest release of the matching major line (e.g. `ngx-echarts` `16.2.0`) even when published after Angular `n+1`, then `(c)` newest release published on or before Angular `n+1`'s release date (`unknown-low-confidence` when none qualify).
@@ -50,7 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Sequential $n-1 \to n$ Planning:** Plans Angular major upgrades one step at a time (`plan --to <major>`), marking steps after the first as provisional until the preceding step is completed.
+- **Sequential $n \to n+1$ Planning:** Plans Angular major upgrades one step at a time (`plan --to <major>`), marking steps after the first as provisional until the preceding step is completed.
 - **Dependency Blocker & Peer-Range Analysis:**
   - Evaluates npm registry metadata (including prereleases such as `@angular/flex-layout@15.0.0-beta.42` with `includePrerelease`) and peer dependency ranges against target Angular versions.
   - Distinguishes **hard** blockers (`no-compatible-version`, `peer-conflict`, `ivy-or-ngcc`) from **soft** blockers (`deprecated`, `unmaintained` with compatible peer ranges).

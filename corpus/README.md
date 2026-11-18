@@ -51,7 +51,7 @@ In addition to the 5 core calibration fixtures above, 3 large enterprise applica
 
 Each corpus benchmark is associated with an exact baseline JSON record under `corpus/baselines/` (plus `corpus/golden-counts.json` for offline step blocker/note count regression) documenting:
 1. Pinned commit SHA, recorded license, and execution tier (`ci` vs `local-only`).
-2. Expected major upgrade steps ($n-1 \to n$).
+2. Expected major upgrade steps ($n \to n+1$).
 3. Expected dependency blockers, their severity (`hard: true | false`), and classified reasons (`deprecated`, `unmaintained`, `no-compatible-version`, etc.).
 4. Expected recommendation (`remove`, `alternate`, `inline`, `upgrade`, `fork`, `manual`), confidence, and runner-ups.
 5. CI and nightly workflows only run baselines with `tier: "ci"` (`ci: true`, `nightly: true`) and a verified permissive license; `local-only` baselines (`ci: false`, `nightly: false`) are never cloned or executed in CI/nightly.

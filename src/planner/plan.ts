@@ -54,7 +54,7 @@ export async function createPlan(options: PlanOptions): Promise<Plan> {
     throw new NgmError(
       'NGM-2002',
       `Target major version ${targetMajor} must be greater than current major ${currentMajor}.`,
-      { hint: 'ng-migrator only plans forward upgrades (n-1 to n).' },
+      { hint: 'ng-migrator only plans forward upgrades (n to n+1).' },
     );
   }
 
