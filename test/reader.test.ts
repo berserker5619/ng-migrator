@@ -2,7 +2,7 @@ import { copyFile, mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { walkProject } from '../src/reader/files.js';
-import { classifyStyle, findCaseMismatchedImports, readProject } from '../src/reader/project.js';
+import { classifyStyle, findCaseMismatchedImports, findNestedAngularProjects, readProject } from '../src/reader/project.js';
 import { tempProject } from './helpers.js';
 
 let dir: string;
@@ -69,7 +69,54 @@ describe('case mismatched imports', () => {
 
 describe('readProject', () => {
   it('throws NGM-3007 when package.json does not exist', async () => {
-    await expect(readProject(dir)).rejects.toMatchObject({ id: 'NGM-3007' });
+    await expect(readProject(dir)).rejects.toMatchObject({
+      id: 'NGM-3007',
+      hint: 'Run ng-migrator from the root of an Angular project.',
+    });
+  });
+
+  it('suggests --project <subfolder> when package.json is missing and a single nested Angular app exists', async () => {
+    await mkdir(path.join(dir, 'angular'), { recursive: true });
+    await mkdir(path.join(dir, 'java'), { recursive: true });
+    await writeFile(path.join(dir, 'angular', 'package.json'), JSON.stringify({ name: 'nested-ng' }));
+    await writeFile(path.join(dir, 'angular', 'angular.json'), JSON.stringify({ projects: {} }));
+
+    await expect(findNestedAngularProjects(dir)).resolves.toEqual(['angular']);
+    await expect(readProject(dir)).rejects.toMatchObject({
+      id: 'NGM-3007',
+      hint: expect.stringContaining('--project angular'),
+    });
+  });
+
+  it('detects multiple nested Angular projects up to depth 2 while skipping ignored and non-Angular folders', async () => {
+    await mkdir(path.join(dir, 'apps', 'web'), { recursive: true });
+    await writeFile(path.join(dir, 'apps', 'web', 'package.json'), '{}');
+    await writeFile(path.join(dir, 'apps', 'web', 'angular.json'), '{}');
+
+    await mkdir(path.join(dir, 'frontend'), { recursive: true });
+    await writeFile(path.join(dir, 'frontend', 'package.json'), '{}');
+    await writeFile(path.join(dir, 'frontend', 'angular.json'), '{}');
+
+    // Nx Angular workspace without angular.json
+    await mkdir(path.join(dir, 'nx-app'), { recursive: true });
+    await writeFile(
+      path.join(dir, 'nx-app', 'package.json'),
+      JSON.stringify({ dependencies: { '@angular/core': '^19.0.0' } }),
+    );
+    await writeFile(path.join(dir, 'nx-app', 'nx.json'), '{}');
+
+    // Non-Angular package and ignored folder should not be listed
+    await mkdir(path.join(dir, 'backend'), { recursive: true });
+    await writeFile(path.join(dir, 'backend', 'package.json'), JSON.stringify({ dependencies: { express: '^4.0.0' } }));
+    await mkdir(path.join(dir, 'node_modules', 'fake'), { recursive: true });
+    await writeFile(path.join(dir, 'node_modules', 'fake', 'package.json'), '{}');
+    await writeFile(path.join(dir, 'node_modules', 'fake', 'angular.json'), '{}');
+
+    await expect(findNestedAngularProjects(dir)).resolves.toEqual(['apps/web', 'frontend', 'nx-app']);
+    await expect(readProject(dir)).rejects.toMatchObject({
+      id: 'NGM-3007',
+      hint: expect.stringContaining('apps/web, frontend, nx-app'),
+    });
   });
 
   it('detects packageManager field over lockfiles', async () => {

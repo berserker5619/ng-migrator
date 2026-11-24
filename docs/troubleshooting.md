@@ -33,7 +33,7 @@ Every error reported by `ng-migrator` includes a stable identifier (`NGM-XXXX`) 
 ## NGM-2002: Invalid target version
 
 - **What happened:** The `--to <major>` value could not be used as a forward Angular major upgrade target.
-- **Why:** `--to` was given a range or minor version (such as `19.1` or `^19`), a major version less than or equal to the project's current Angular major, or an explicit target major version with no published `@angular/core` releases (e.g. `--to 23`). Note that running `ng-migrator analyze` without `--to` on a project already on the latest published Angular major is not an error; it exits 0 with a message indicating the project is already up-to-date.
+- **Why:** `--to` was given a range or minor version (such as `19.1` or `^19`), a major version less than or equal to the project's current Angular major, or an explicit target major version with no published `@angular/core` releases (e.g. `--to 23`). Note that running `ng-migrator analyze` or `ng-migrator plan` without `--to` on a project already on the latest published Angular major is not an error; it exits 0 with a message indicating the project is already up-to-date.
 - **What to do next:** Pass a single integer Angular major greater than your project's current major and within published releases (for example, `ng-migrator plan --to 17`).
 
 ## NGM-2003: Invalid configuration file
@@ -82,7 +82,7 @@ Every error reported by `ng-migrator` includes a stable identifier (`NGM-XXXX`) 
 
 - **What happened:** `package.json` could not be found in the project root, is invalid JSON, or does not declare `@angular/core`.
 - **Why:** `ng-migrator` was invoked in a directory that is not an Angular workspace root.
-- **What to do next:** Run `ng-migrator` from the folder containing your Angular `package.json`, or pass `--project <path>` pointing to the Angular workspace root.
+- **What to do next:** Run `ng-migrator` from the folder containing your Angular `package.json`, or pass `--project <path>` pointing to the Angular workspace root. When an Angular app lives in a nested subfolder (up to depth 2), `ng-migrator` lists detected subfolders and suggests the `--project <subfolder>` flag automatically.
 
 ## NGM-3008: Angular version not supported
 

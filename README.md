@@ -19,7 +19,8 @@ ng-migrator doctor
 # 3. Inspect blockers for the immediate next Angular major version
 ng-migrator analyze
 
-# 4. Generate one Markdown runbook per n -> n+1 step up to your target major
+# 4. Generate Markdown runbooks (defaults to the immediate next major, or pass --to <major>)
+ng-migrator plan
 ng-migrator plan --to 19
 
 # 5. Check which steps are planned or approved
@@ -77,13 +78,13 @@ ng-migrator --project ./path/to/app --as-of 2026-11-01 plan --to 19
 |---|---|
 | `ng-migrator doctor` | Pre-upgrade check: Node runtime (`>=22`), Git working tree status, Angular version (including manifest vs lockfile disagreements), package manager detection, path length warnings, and active port 4200 check. |
 | `ng-migrator analyze` | Reports current Angular version, dependencies, and blockers for the next major (or audit-only mode when already at the latest published Angular major). Supports `--fail-on-blockers` (exits with code `4` on hard blockers only), `--report <path>`, and `--offline`. |
-| `ng-migrator plan --to <major>` | Generates one `.ng-migrator/steps/XX-angular-N-to-M.md` document per step and `.ng-migrator/summary.md`. Supports `--package-manager <npm\|yarn\|pnpm>`, `--rules <path...>`, `--offline`, and `--allow-dirty`. |
+| `ng-migrator plan [--to <major>]` | Generates one `.ng-migrator/steps/XX-angular-N-to-M.md` document per `n -> n+1` step and `.ng-migrator/summary.md`. Defaults `--to` to the next major (`n+1`), or exits `0` if already at the latest published Angular major. Supports `--package-manager <npm\|yarn\|pnpm>`, `--rules <path...>`, `--offline`, and `--allow-dirty`. |
 | `ng-migrator status` | Shows which steps are `planned` or `approved`. |
 | `ng-migrator approve <step>` | Reads ticked decision checkboxes and reviewer notes from the step document and marks the step `approved` in `.ng-migrator/state.json`. |
 
 ### Global Options
 
-- `--project <path>`: Path to the Angular project root (default: current directory). All paths in output remain project-relative.
+- `--project <path>`: Path to the Angular project root (default: current directory). If run in a parent folder without an Angular `package.json`, `ng-migrator` scans subfolders and suggests `--project <subfolder>`. All paths in output remain project-relative.
 - `--as-of <date>`: Reference ISO date (for example `2026-11-01`) used to evaluate the unmaintained threshold and timestamps deterministically.
 - `--no-color`: Plain output without ANSI colors.
 - `--ascii`: ASCII symbols only (`[ok]`, `[!]`, `[x]`, `-`).

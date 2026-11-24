@@ -1,10 +1,10 @@
-import { readFile } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import semver from 'semver';
 import type { PackageManager } from '../config/config.js';
 import { NgmError } from '../errors.js';
 import { pathExists, readJsonIfExists } from '../platform/fs.js';
-import { compareOrdinal } from '../platform/paths.js';
+import { compareOrdinal, toPosix } from '../platform/paths.js';
 import exceptions from '../rules/angular-exceptions.json' with { type: 'json' };
 import type { DependencyInfo, DependencyType, ProjectInfo, ProjectStyle, WorkspaceType } from '../model.js';
 import { safeMinVersion } from '../resolver/range.js';
@@ -224,12 +224,94 @@ async function hasAngularPeer(root: string, name: string): Promise<boolean> {
   return Object.keys(pkg?.peerDependencies ?? {}).some((p) => p.startsWith('@angular/'));
 }
 
+/** Folders skipped when scanning for nested Angular projects. */
+const NESTED_SKIP_DIRS = new Set([
+  'node_modules',
+  '.git',
+  'dist',
+  '.angular',
+  '.ng-migrator',
+  'coverage',
+  '.nx',
+  'tmp',
+  'out-tsc',
+  '.cache',
+  'build',
+  'target',
+  'vendor',
+]);
+
+async function isAngularProjectDir(dir: string): Promise<boolean> {
+  const pkgPath = path.join(dir, 'package.json');
+  if (!(await pathExists(pkgPath))) return false;
+  if (await pathExists(path.join(dir, 'angular.json'))) return true;
+  if (await pathExists(path.join(dir, 'nx.json'))) {
+    const pkg = await readJsonIfExists<PackageJson>(pkgPath).catch(() => undefined);
+    if (pkg?.dependencies?.['@angular/core'] !== undefined || pkg?.devDependencies?.['@angular/core'] !== undefined) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Scan immediate and nested subfolders (up to `maxDepth`, default 2) for Angular projects
+ * containing `package.json` + `angular.json` (or `nx.json` with `@angular/core`).
+ */
+export async function findNestedAngularProjects(
+  root: string,
+  options: { maxDepth?: number; maxDirs?: number } = {},
+): Promise<string[]> {
+  const maxDepth = options.maxDepth ?? 2;
+  const maxDirs = options.maxDirs ?? 200;
+  const found: string[] = [];
+  let visited = 0;
+
+  async function visit(dir: string, depth: number): Promise<void> {
+    if (depth > maxDepth || visited >= maxDirs) return;
+    let entries;
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    entries.sort((a, b) => compareOrdinal(a.name, b.name));
+    for (const entry of entries) {
+      if (visited >= maxDirs) return;
+      if (!entry.isDirectory()) continue;
+      if (entry.name.startsWith('.') || NESTED_SKIP_DIRS.has(entry.name)) continue;
+      visited++;
+      const full = path.join(dir, entry.name);
+      if (await isAngularProjectDir(full)) {
+        found.push(toPosix(path.relative(root, full)));
+        continue;
+      }
+      if (depth < maxDepth) {
+        await visit(full, depth + 1);
+      }
+    }
+  }
+
+  await visit(root, 1);
+  return found.sort(compareOrdinal);
+}
+
+export function formatNestedAngularHint(nested: readonly string[], fallbackHint: string): string {
+  if (nested.length === 0) return fallbackHint;
+  if (nested.length === 1) {
+    return `Found Angular project in "${nested[0]}". Re-run with --project ${nested[0]} (for example: ng-migrator --project ${nested[0]} analyze).`;
+  }
+  return `Found Angular projects in subfolders: ${nested.join(', ')}. Re-run with --project <subfolder> (for example: ng-migrator --project ${nested[0]} analyze).`;
+}
+
 /** Read the project without changing anything (plan section 7.1). */
 export async function readProject(root: string): Promise<ProjectInfo> {
   const warnings: string[] = [];
   const pkg = await readJsonIfExists<PackageJson>(path.join(root, 'package.json'));
   if (!pkg) {
-    throw new NgmError('NGM-3007', 'No package.json in this folder.', { hint: 'Run ng-migrator from the root of an Angular project.' });
+    const nested = await findNestedAngularProjects(root);
+    const hint = formatNestedAngularHint(nested, 'Run ng-migrator from the root of an Angular project.');
+    throw new NgmError('NGM-3007', 'No package.json in this folder.', { hint });
   }
 
   const packageManager = await detectPackageManager(root, pkg, warnings);

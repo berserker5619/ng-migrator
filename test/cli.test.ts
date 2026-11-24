@@ -3,6 +3,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { runCli, type CliIo } from '../src/cli/program.js';
 import { ERRORS, ExitCode } from '../src/errors.js';
+import { pathExists } from '../src/platform/fs.js';
 import { TOOL_VERSION } from '../src/version.js';
 import { tempProject, writeCacheEntry } from './helpers.js';
 
@@ -25,9 +26,9 @@ function io(overrides: Partial<CliIo> = {}) {
 describe('cli', () => {
   it('prints the version', async () => {
     const t = io();
-    expect(TOOL_VERSION).toBe('1.2.1');
+    expect(TOOL_VERSION).toBe('1.3.0');
     expect(await runCli(['--version'], t.value)).toBe(ExitCode.Success);
-    expect(t.out().trim()).toBe('1.2.1');
+    expect(t.out().trim()).toBe('1.3.0');
   });
 
   it('lists the 1.0 commands in help and rejects migrate', async () => {
@@ -489,6 +490,126 @@ describe('cli', () => {
       expect(planIo.err()).toContain('[i] Total elapsed time:');
       expect(planIo.out()).not.toContain('Fetching registry metadata');
       expect(planIo.err()).not.toContain('\u001b[');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('defaults plan without --to to next major (n+1) and exits 0 when already on latest major', async () => {
+    const { dir, cleanup } = await tempProject({
+      'package.json': JSON.stringify({
+        name: 'default-to-plan-app',
+        dependencies: { '@angular/core': '^15.2.0' },
+      }),
+    });
+    try {
+      await writeCacheEntry(dir, '@angular/core', {
+        name: '@angular/core',
+        distTags: { latest: '16.2.12' },
+        versions: {
+          '15.2.0': { version: '15.2.0' },
+          '16.2.12': { version: '16.2.12' },
+        },
+      });
+      await writeCacheEntry(dir, '@angular/compiler-cli', {
+        name: '@angular/compiler-cli',
+        distTags: { latest: '16.2.12' },
+        versions: {
+          '16.2.12': { version: '16.2.12', peerDependencies: { typescript: '>=4.9.3 <5.2.0' } },
+        },
+      });
+      await writeCacheEntry(dir, '@angular/cli', {
+        name: '@angular/cli',
+        distTags: { latest: '16.2.12' },
+        versions: {
+          '16.2.12': { version: '16.2.12' },
+        },
+      });
+
+      const planIo = io({ cwd: dir });
+      expect(await runCli(['--ascii', 'plan', '--offline', '--allow-dirty'], planIo.value)).toBe(ExitCode.Success);
+      expect(planIo.out()).toContain('Planning upgrade: Angular 15.2.0 -> 16');
+      expect(planIo.out()).toContain('.ng-migrator/steps/01-angular-15-to-16.md');
+      expect(await pathExists(path.join(dir, '.ng-migrator', 'steps', '01-angular-15-to-16.md'))).toBe(true);
+
+      // Now simulate a project already on the latest published major (22)
+      const latest = await tempProject({
+        'package.json': JSON.stringify({
+          name: 'already-latest-app',
+          dependencies: { '@angular/core': '^22.0.0' },
+        }),
+      });
+      try {
+        await writeCacheEntry(latest.dir, '@angular/core', {
+          name: '@angular/core',
+          distTags: { latest: '22.2.0' },
+          versions: {
+            '22.0.0': { version: '22.0.0' },
+            '22.2.0': { version: '22.2.0' },
+          },
+        });
+
+        const latestPlanIo = io({ cwd: latest.dir });
+        expect(await runCli(['--ascii', 'plan', '--offline', '--allow-dirty'], latestPlanIo.value)).toBe(ExitCode.Success);
+        expect(latestPlanIo.out()).toContain('already on the latest published major (22); nothing to plan');
+        expect(await pathExists(path.join(latest.dir, '.ng-migrator', 'steps'))).toBe(false);
+
+        const outOfBoundsIo = io({ cwd: latest.dir });
+        expect(await runCli(['plan', '--to', '23', '--offline', '--allow-dirty'], outOfBoundsIo.value)).toBe(ExitCode.Usage);
+        expect(outOfBoundsIo.err()).toContain('NGM-2002');
+      } finally {
+        await latest.cleanup();
+      }
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('suggests --project <subfolder> across doctor, analyze, and plan when Angular lives in a nested folder', async () => {
+    const { dir, cleanup } = await tempProject();
+    try {
+      await mkdir(path.join(dir, 'angular'), { recursive: true });
+      await writeFile(
+        path.join(dir, 'angular', 'package.json'),
+        JSON.stringify({ name: 'nested-app', dependencies: { '@angular/core': '^15.2.0' } }),
+      );
+      await writeFile(path.join(dir, 'angular', 'angular.json'), JSON.stringify({ projects: {} }));
+
+      // doctor prints hint on missing root package.json
+      const docIo = io({ cwd: dir });
+      expect(await runCli(['--ascii', 'doctor'], docIo.value)).toBe(ExitCode.Success);
+      expect(docIo.err()).toContain('No package.json in this folder');
+      expect(docIo.out()).toContain('--project angular');
+
+      // analyze exits 3 with NGM-3007 and hint
+      const anaIo = io({ cwd: dir });
+      expect(await runCli(['--ascii', 'analyze', '--offline'], anaIo.value)).toBe(ExitCode.Precondition);
+      expect(anaIo.err()).toContain('NGM-3007');
+      expect(anaIo.out()).toContain('--project angular');
+
+      // plan exits 3 with NGM-3007, prints hint, and does not create .ng-migrator in the non-Angular root
+      const planIo = io({ cwd: dir });
+      expect(await runCli(['--ascii', 'plan', '--offline'], planIo.value)).toBe(ExitCode.Precondition);
+      expect(planIo.err()).toContain('NGM-3007');
+      expect(planIo.out()).toContain('--project angular');
+      expect(await pathExists(path.join(dir, '.ng-migrator'))).toBe(false);
+
+      // Root package.json without @angular/core also suggests nested subfolder
+      await writeFile(path.join(dir, 'package.json'), JSON.stringify({ name: 'monorepo-root', private: true }));
+
+      const monoDocIo = io({ cwd: dir });
+      expect(await runCli(['--ascii', 'doctor'], monoDocIo.value)).toBe(ExitCode.Success);
+      expect(monoDocIo.err()).toContain('--project angular');
+
+      const monoAnaIo = io({ cwd: dir });
+      expect(await runCli(['--ascii', 'analyze', '--offline'], monoAnaIo.value)).toBe(ExitCode.Precondition);
+      expect(monoAnaIo.err()).toContain('NGM-3007');
+      expect(monoAnaIo.out()).toContain('--project angular');
+
+      const monoPlanIo = io({ cwd: dir });
+      expect(await runCli(['--ascii', 'plan', '--offline'], monoPlanIo.value)).toBe(ExitCode.Precondition);
+      expect(monoPlanIo.err()).toContain('NGM-3007');
+      expect(monoPlanIo.out()).toContain('--project angular');
     } finally {
       await cleanup();
     }

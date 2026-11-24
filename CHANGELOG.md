@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-11-24
+
+- **Optional `--to` on `plan`**: `ng-migrator plan` without `--to` now defaults to the next Angular major (`n+1`), matching `analyze`. When the project is already on the latest published Angular major and `--to` is omitted, `plan` reports that nothing needs to be planned and exits `0`.
+- **Nested Angular App Detection (`NGM-3007`)**: When `package.json` or `@angular/core` is missing in the target directory (for example, in full-stack repositories with an `angular/` or `frontend/` subfolder), `ng-migrator` scans subfolders (up to depth 2) for `package.json` + `angular.json` (or `nx.json` with `@angular/core`) and suggests `--project <subfolder>` across `doctor`, `analyze`, and `plan`, without creating `.ng-migrator/` in the non-Angular root.
+
 ## [1.2.1] - 2026-11-18
 
 - Updated CLI help text, error hints, package description, and documentation from `n-1 to n` to `n to n+1`.

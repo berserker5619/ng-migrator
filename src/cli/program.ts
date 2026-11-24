@@ -23,7 +23,7 @@ import { checkGitStatus } from '../platform/git.js';
 import { writeGeneratedText } from '../platform/text.js';
 import { getStepRequirements } from '../planner/metadata.js';
 import { createPlan } from '../planner/plan.js';
-import { readProject } from '../reader/project.js';
+import { findNestedAngularProjects, formatNestedAngularHint, readProject } from '../reader/project.js';
 import { loadRules } from '../recommend/rules.js';
 import { RegistryClient, stableVersionsDesc } from '../registry/client.js';
 import { loadNpmrc } from '../registry/npmrc.js';
@@ -143,12 +143,22 @@ export function createProgram(
             out.warn(`⚠ Warning: Manifest vs lockfile disagreement: ${project.manifestLockfileDisagreement.reason}`);
           }
 
+          if (project.angular.major === undefined) {
+            const nested = await findNestedAngularProjects(projectRoot);
+            if (nested.length > 0) {
+              out.warn(formatNestedAngularHint(nested, ''));
+            }
+          }
+
           if (project.warnings.length > 0) {
             out.info('\nProject warnings:');
             for (const w of project.warnings) out.warn(`  - ${w}`);
           }
         } catch (err) {
           out.error(`Project check failed: ${(err as Error).message}`);
+          if (isNgmError(err) && err.hint) {
+            out.info(`  ${err.hint}`);
+          }
         }
 
         // 4. Running dev server check (locks files on Windows)
@@ -181,7 +191,9 @@ export function createProgram(
 
         const currentMajor = project.angular.major;
         if (!currentMajor) {
-          throw new NgmError('NGM-3007', 'Could not detect Angular version from project dependencies.');
+          const nested = await findNestedAngularProjects(projectRoot);
+          const hint = formatNestedAngularHint(nested, 'Ensure this is an Angular project with @angular/core in dependencies.');
+          throw new NgmError('NGM-3007', 'Could not detect Angular version from project dependencies.', { hint });
         }
 
         const { config: fileConfig } = await readConfigFile(projectRoot);
@@ -195,9 +207,8 @@ export function createProgram(
         });
 
         const corePack = await registry.packument('@angular/core');
-        const maxPublishedMajor = corePack
-          ? Math.max(...stableVersionsDesc(corePack).map((v) => semver.major(v)))
-          : 22;
+        const stableMajors = corePack ? stableVersionsDesc(corePack).map((v) => semver.major(v)) : [];
+        const maxPublishedMajor = stableMajors.length > 0 ? Math.max(...stableMajors) : 22;
 
         // When running analyze without --to on a project already at the latest Angular major,
         // report audit status and exit 0 (plan Section 19.3).
@@ -344,13 +355,13 @@ export function createProgram(
   program
     .command('plan')
     .description('write one document per n to n+1 step; changes nothing in the project')
-    .requiredOption('--to <major>', 'final Angular major version, for example 19')
+    .option('--to <major>', 'final Angular major version (defaults to next major)')
     .addOption(new Option('--package-manager <name>', 'override detection').choices([...PACKAGE_MANAGERS]))
     .option('--rules <path...>', 'extra rule files')
     .option('--offline', 'use cached registry data only')
     .option('--allow-dirty', 'allow uncommitted changes in the working tree')
     .action(async (opts: {
-      to: string;
+      to?: string;
       packageManager?: PackageManager;
       rules?: string[];
       offline?: boolean;
@@ -359,7 +370,7 @@ export function createProgram(
       const startedAt = Date.now();
       const out = getOutput();
       const projectRoot = getProjectRoot();
-      const targetMajor = parseTargetMajor(opts.to);
+      const explicitTarget = opts.to !== undefined ? parseTargetMajor(opts.to) : undefined;
 
       try {
         // Check clean working tree
@@ -372,8 +383,15 @@ export function createProgram(
           );
         }
 
+        const project = await readProject(projectRoot);
+        const currentMajor = project.angular.major;
+        if (!project.angular.version || currentMajor === undefined) {
+          const nested = await findNestedAngularProjects(projectRoot);
+          const hint = formatNestedAngularHint(nested, 'Ensure this is an Angular project with @angular/core in dependencies.');
+          throw new NgmError('NGM-3007', 'Could not detect an installed or declared @angular/core version.', { hint });
+        }
+
         await withLock(projectRoot, 'plan', async () => {
-          const project = await readProject(projectRoot);
           const { config: fileConfig } = await readConfigFile(projectRoot);
           const config = resolveConfig(
             { packageManager: opts.packageManager, rules: opts.rules },
@@ -388,6 +406,30 @@ export function createProgram(
             offline: opts.offline,
             onWarning: (msg) => out.warn(msg),
           });
+
+          const corePack = await registry.packument('@angular/core');
+          const stableMajors = corePack ? stableVersionsDesc(corePack).map((v) => semver.major(v)) : [];
+          const maxPublishedMajor = stableMajors.length > 0 ? Math.max(...stableMajors) : 22;
+
+          if (explicitTarget === undefined && currentMajor >= maxPublishedMajor) {
+            if (project.manifestLockfileDisagreement) {
+              out.warn(`⚠ Warning: Manifest vs lockfile disagreement: ${project.manifestLockfileDisagreement.reason}\n`);
+            }
+            out.success(`Project is already on the latest published major (${currentMajor}); nothing to plan.`);
+            return;
+          }
+
+          const targetMajor = explicitTarget ?? (currentMajor + 1);
+          if (explicitTarget !== undefined && explicitTarget <= currentMajor) {
+            throw new NgmError(
+              'NGM-2002',
+              `Target major version ${explicitTarget} must be greater than current major ${currentMajor}.`,
+              { hint: 'ng-migrator only plans forward upgrades (n to n+1).' },
+            );
+          }
+          if (targetMajor > maxPublishedMajor) {
+            throw new NgmError('NGM-2002', `No published releases found for Angular major version ${targetMajor}.`);
+          }
 
           const clock = getClock();
           if (project.manifestLockfileDisagreement) {
@@ -442,7 +484,7 @@ export function createProgram(
       const state = await readState(projectRoot);
       if (!state || state.steps.length === 0) {
         out.info('No active migration plan found.');
-        out.info('Run "ng-migrator plan --to <major>" to generate a plan.');
+        out.info('Run "ng-migrator plan" (or "ng-migrator plan --to <major>") to generate a plan.');
         return;
       }
 
@@ -478,7 +520,7 @@ export function createProgram(
       await withLock(projectRoot, 'approve', async () => {
         const state = await readState(projectRoot);
         if (!state) {
-          throw new NgmError('NGM-3005', 'No migration state found. Run "ng-migrator plan --to <major>" first.');
+          throw new NgmError('NGM-3005', 'No migration state found. Run "ng-migrator plan" (or "ng-migrator plan --to <major>") first.');
         }
 
         const step = state.steps.find((s) => s.index === stepIndex);
